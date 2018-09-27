@@ -42,7 +42,7 @@ stim_dir = 'Image_Files\';
 % Specify directory containing config files
 switch nargin
     case 0
-        [config_fname,config_path] = uigetfile('./*.csv',...
+        [config_fname,config_path] = uigetfile('./Config_Files/*.csv',...
                                        'Select an experiment config file');
         config_fname = [config_path config_fname];
     case 1
@@ -88,6 +88,7 @@ img_names = unique(img_names);
 % Load each unique stimulus image as a PsychToolbox texture handle 
 % and store handles in a Map object to render during trials
 stim_textures = ptb_loadtextures(stim_dir, img_names, img_formats, ptb);
+
 % stim_textures = containers.Map;
 % for i=1:length(img_names)
 %     % Retrieve name of stimulus image
@@ -191,7 +192,7 @@ for b=1:num_blocks
     % If this is the very  first trial, present a start screen and wait
     % for a key-press
     if b == 1
-        DrawFormattedText(window, welcomeMsg, 'center', 'center', ptb.black);
+        DrawFormattedText(window,welcomeMsg,'center','center',ptb.black);
         Screen('Flip', window);
 
         % Listen for Esc key to abort experiment
@@ -225,17 +226,21 @@ for b=1:num_blocks
         % Retrieve stimuli list for current trial
         trial_dat = block_dat(block_dat.trial_num == tn, :);
         
+        % Calculate total number of frames for current trial
+        trial_frames  = ceil(max(trial_dat.trial_max_time) / ptb.ifi);
+
         % Convert cell array of stim names to char arrays
         stim_img_names = cell2mat(trial_dat.stim_img_name);
         
-        % Calculate total number of frames for current trial
-        trial_frames  = ceil(max(trial_dat.trial_max_time) / ifi);
-
         % Make event schedule arrays, which will allow for rapid checking
         % of which stimuli to render for each frame
         [num_stims, ~] = size(stim_img_names);
         stim_schedule = zeros(num_stims, trial_frames);
         mask_schedule = zeros(num_stims, trial_frames);
+        fixation_schedule = zeros(num_stims, trial_frames);
+        
+        % Initialize counters for fixation durations
+        fixation_counter = zeros(num_stims, 3);
 
         % Initialize bounding rectangle for each stimulus
         stim_bounds = zeros(num_stims, 4);
@@ -261,15 +266,29 @@ for b=1:num_blocks
             end
             
             % Fill all frames where this stim is displayed with a 1
-            stim_img_on = ceil(st.stim_onset / ifi);
-            stim_img_off = ceil((st.stim_onset+st.stim_duration) / ifi);
-            stim_schedule(s, stim_img_on:stim_img_off) = 1;
+            stim_img_on = ceil(st.stim_onset / ifi) + 1;
+            stim_img_off = ceil((st.stim_onset+st.stim_duration) / ifi) + 1;
+            if stim_img_on ~= stim_img_off
+                stim_schedule(s, stim_img_on:stim_img_off) = 1;
+            end
 
             % Fill all frames where this stim's mask is displayed with a 1
-            mask_img_on = ceil(st.mask_onset / ifi);
-            mask_img_off = ceil((st.mask_onset+st.mask_duration) / ifi);
-            mask_schedule(s, mask_img_on:mask_img_off) = 1;
-
+            mask_img_on = ceil(st.mask_onset / ifi) + 1;
+            mask_img_off = ceil((st.mask_onset+st.mask_duration) / ifi) + 1;
+            if mask_img_on ~= mask_img_off
+                mask_schedule(s, mask_img_on:mask_img_off) = 1;
+            end
+            
+            % If stim is a fixation event, save in fixation schedule
+            if st.subj_fixation_type ~= 0
+                fixation_schedule(s, st.subj_fixation_onset + 1) = st.subj_fixation_type;
+                fixation_frames = ceil(st.subj_fixation_duration / ifi);
+                fixation_counter(s, 1) = fixation_frames;
+            end
+            
+            % Note if there are no fixation in the current trial
+            no_fixations = ( sum(sum(fixation_schedule)) == 0 );
+            
             % Draw rectangle at the requested stimulus size
             rect = [0 0 st.stim_size_x st.stim_size_y] * ptb.ppcm;
 
@@ -295,7 +314,7 @@ for b=1:num_blocks
             mask_dotcolors = [ones(1,3).*st.mask_color 1];
 
             % Set the size of the dots
-            mask_dotsizes = ones(1, mask_ndots) .* st.mask_size;
+            mask_dotsizes = ones(1, mask_ndots) .* max(1, st.mask_size);
 
 
             %------ Scale and offset mask points according to input params
@@ -334,55 +353,54 @@ for b=1:num_blocks
             dotBoundingRect{s} = rect;
         end % stim loop
 
-        % -- Display trial stimuli, record responses ---------------------
+        % -- Initialize trial variables, timing table ---------------------
 
-        % Draw the fixation cross in black, set it to the center of our
-        % screen and set good quality antialiasing
-        Screen('DrawLines', window, allCoords,...
-            lineWidthPix, ptb.black, [ptb.xCenter ptb.yCenter], 2);
+        % Init time stamps (will be overwritten on first Screen flip)
+        trial_timestamps = nan(4, trial_frames);
+        
+        % Vectors for touch and gaze data
+        trial_touch_samples = nan(3, trial_frames); % x, y, is_touching
+        trial_gaze_samples = nan(2, trial_frames);
 
-        % Flip again to sync us to the vertical retrace
-        vbl = Screen('Flip', window);
-
-        % Display fixation cross and wait for trial to begin
-        % (can be set to key press, eye on fixation, finger on screen, etc)
-        trialWait = true;
-        while trialWait == true
-            % Draw the fixation cross in black, set it to the center of
-            % our screen and set good quality antialiasing
-            Screen('DrawLines', window, allCoords,...
-                lineWidthPix, ptb.black, [ptb.xCenter ptb.yCenter], 2);
-
-            % Listen for Esc key to abort experiment, Space to begin
-            [keyIsDown, ~, keyCode] = KbCheck;
-            if keyIsDown && keyCode(ptb.escapeKey)
-                sca;
-                return
-            elseif keyCode(ptb.spaceKey)
-                trialWait = false;
-            end
-
-            % Flip again to sync us to the vertical retrace
-            vbl = Screen('Flip', window);
-        end
-
-        % Init time stamp (will be overwritten on first Screen flip)
-        rtStart = NaN;
-        max_mouse_samples = round(10 / ifi);
-        mouseData = zeros(3, max_mouse_samples);
-        mouseCounter = 1;
-
-        % Flip again to sync us to the vertical retrace
-        vbl = Screen('Flip', window);
-
+        % Record of which stims were displayed at each frame
+        stim_presentations = zeros(num_stims, trial_frames);
+        
+        % Response time - depends on fixation type, see README 
+        % (rt1 = target onset to stim choice) 
+        % (rt2 = unused) 
+        % OR
+        % (rt1 = target onset to saccade/finger lift)
+        % (rt2 = saccade/finger lift to stim/choice)
+        rt1_start = NaN;
+        rt1 = NaN;
+        rt2_start = NaN;
+        rt2 = NaN;
+        
+        % State variables which control response time markers
+        [start_rt1, end_rt1, start_rt2, end_rt2] = deal(false);
+        
         % Cue to determine whether a response has been made
         hasSelected = false;
+        
+        % Cue to determine if a fixation pause is happening
+        isFixation = false;
+        
+        % Frame counters: one for total elapsed time (incl. fixation pause)
+        % and one for stimuli schedule
+        frame = 1;
+        stim_sched_frame = 1;
+        
+        % If we have passed fixation requirement, save this state as we
+        % will begin reactime time on saccade/finger lift
+        post_fix = 0;
+        
+        % -- Display trial stimuli, record responses ----------------------
 
-        % Save response time (no response = NaN)
-        rt = NaN;
+        % Flip again to sync us to the vertical retrace
+        vbl = Screen('Flip', window);
         
         % Display all stimuli which are scheduled for the current frame
-        for frame=1:trial_frames
+        while frame < trial_frames + 1
 
             % Listen for Esc key to abort experiment
             [keyIsDown, ~, keyCode] = KbCheck;
@@ -396,27 +414,89 @@ for b=1:num_blocks
 
             % We clamp the values at the maximum values of the screen
             % in X and Y in case people have two monitors connected.
-            tx = min(tx, screenXpixels);
-            ty = min(ty, screenYpixels);
+            tx = min(tx, ptb.screenXpixels);
+            ty = min(ty, ptb.screenYpixels);
 
-            % Store mouse position sample in mouseData array
-            if mouseCounter < max_mouse_samples
-                mouseData(1, mouseCounter) = tx;
-                mouseData(2, mouseCounter) = ty;
-                mouseData(3, mouseCounter) = vbl;
-                mouseCounter = mouseCounter + 1;
+            % Store touch location and whether finger is touching
+            trial_touch_samples(1, frame) = tx;
+            trial_touch_samples(2, frame) = ty;
+            trial_touch_samples(3, frame) = any(buttons ~= 0);
+
+            % Get current gaze value
+            % TBD
+            
+            % Test if saccade has occurred, start response period 2
+            if post_fix == 1
+            end    
+               
+            % Test if finger lift has occurred, start response period 2
+            if post_fix == 2 && all(buttons == 0)
+                end_rt1 = true;
+                start_rt2 = true;
             end
-
+            
+            % Check if fixation appears in current frame
+            fixations = find(fixation_schedule(:,frame) ~= 0, 1);
+            if ~isempty(fixations)
+                isFixation = true;
+                post_fix = 0;
+                for f=1:length(fixations)
+                    fidx = fixations(f);
+                    % Set fixation to active
+                    fixation_counter(fidx,3) = true;
+                    % Note fixation type in counter
+                    fixation_counter(fidx,4) = fixation_schedule(fidx,frame);
+                end
+            end
+            
+            % Test each active fixation for gaze/touch and iterate counters       
+            active_fixations = find(fixation_counter(:,3) == true, 1);
+            if isempty(active_fixations)
+            	isFixation = false;
+                post_fix = trial_dat.stim_is_target(targetMask);
+            else
+                for f=1:length(active_fixations)
+                    fidx = active_fixations(f);
+                    
+                    % Render fixation image
+                    fix_name = char(trial_dat.stim_img_name(fidx));
+                    Screen('DrawTextures', window,...
+                            stim_textures(fix_name),[],...
+                            stim_bounds(fidx,:), ...
+                            trial_dat.stim_rotation(fidx));
+                    
+                    % If fixation is gaze type, check for gaze
+                    if fixation_counter(fidx,4) == 1
+                    end
+                    
+                    % If fixation is touch type check for touch
+                    if fixation_counter(fidx,4) == 2
+                        if IsInRect(tx, ty, dotBoundingRect{fidx}) && any(buttons ~= 0)
+                            fixation_counter(fidx,2) = fixation_counter(fidx,2) + 1;
+                        end % touched fixation mask
+                    end
+                    
+                    % If subject fixation duration exceeds requirement,
+                    % deactivate fixation
+                    if fixation_counter(fidx,1) < fixation_counter(fidx,2)
+                        fixation_counter(fidx,3) = false;
+                    end
+                end
+            end
+            
             % Check image and mask schedules and render anything to screen
             % that is scheduled to be shown on the current frame
             for s=1:num_stims
-                if stim_schedule(s, frame) == 1
+                if stim_schedule(s, stim_sched_frame) == 1
                     stim_name = char(trial_dat.stim_img_name(s));
                     Screen('DrawTextures', window,...
                             stim_textures(stim_name),[],...
                             stim_bounds(s,:), trial_dat.stim_rotation(s));
+                    if s == targetMask
+                        start_rt1 = true;
+                    end
                 end % image scheduled
-                if mask_schedule(s, frame) == 1
+                if mask_schedule(s, stim_sched_frame) == 1
                     % Draw mask dots
                     Screen('DrawDots', window, dotPosMatrix{s},...
                             dotSizes{s}, dotColors{s}, [], 2);
@@ -431,43 +511,81 @@ for b=1:num_blocks
             end % stim loop
 
             % Flip to the screen
-            vbl = Screen('Flip', window, vbl + (waitframes - 0.5) * ifi);
-
-            % Note start time to calculate reaction time
-            if frame == 1
-                rtStart = vbl;
+            [vbl, sot, flip, miss, ~] = Screen('Flip', window, vbl + (waitframes - 0.5) * ifi);
+            
+            % Store exact timestamp and max error for current frame
+            trial_timestamps(:, frame) = [vbl, sot, flip, miss];
+            
+            % If a touchable mask has been touched, store response time
+            if hasSelected == true
+                if no_fixations
+                    end_rt1 = true;
+                else
+                    end_rt2 = true;
+                end
             end
 
-            % If a touchable mask has been touched, end trial immediately
+            % Note start time to calculate reaction time 1
+            if start_rt1
+                rt1_start = vbl;
+                start_rt1 = false;
+            end
+            
+            % Note end time to calculate reaction time 2
+            if end_rt1
+                rt1 = vbl - rt1_start;
+                end_rt1 = false;
+            end
+            
+            % Note start time to calculate reaction time 2
+            if start_rt2
+                rt2_start = vbl;
+                start_rt2 = false;
+            end
+            
+            % Note end time to calculate reaction time 2
+            if end_rt2
+                rt2 = vbl - rt2_start;
+                end_rt2 = false;
+            end
+            
+            % End trial if selection has been made
             if hasSelected == true
-                rt = vbl - rtStart;
                 correct_choice = (selectedMask == targetMask);
                 break
             end
-
+                
+            % If not in a fixation pause, iterate stim schedule
+            if ~isFixation
+                stim_sched_frame = stim_sched_frame + 1;
+            end
+            
+            % Iterate trial frame counter
+            frame = frame + 1;
+            
         end % frame loop
         
         % -- Output data for current trial --------------------------------
 
-        % Extract target stimulus information from trial stim table
-        tr = trial_dat(targetMask,:);
-        
-        % Record the trial data into out data matrix
-        subjData.Subject{row_ct} = subj;
-        subjData.BlockNum{row_ct} = bn;
-        subjData.TrialNum{row_ct} = row_ct;
-        subjData.BadTrial{row_ct} = 0; % TBD
-        subjData.target_mask_name{row_ct} = cell2mat(tr.stim_img_name);
-        subjData.target_center_x{row_ct} = tr.stim_cent_x;
-        subjData.target_center_y{row_ct} = tr.stim_cent_y;
-        subjData.target_rotation{row_ct} = tr.stim_rotation;
-        subjData.target_mask_num{row_ct} = targetMask;
-        subjData.chosen_mask_num{row_ct} = selectedMask;
-        subjData.choice_correct{row_ct} = correct_choice;
-        subjData.touch_time{row_ct} = rt;
-        subjData.touch_point_x{row_ct} = tx;
-        subjData.touch_point_y{row_ct} = ty;
-        row_ct = row_ct + 1;
+%         % Extract target stimulus information from trial stim table
+%         tr = trial_dat(targetMask,:);
+%         
+%         % Record the trial data into out data matrix
+%         subjData.Subject{row_ct} = subj;
+%         subjData.BlockNum{row_ct} = bn;
+%         subjData.TrialNum{row_ct} = row_ct;
+%         subjData.BadTrial{row_ct} = 0; % TBD
+%         subjData.target_mask_name{row_ct} = cell2mat(tr.stim_img_name);
+%         subjData.target_center_x{row_ct} = tr.stim_cent_x;
+%         subjData.target_center_y{row_ct} = tr.stim_cent_y;
+%         subjData.target_rotation{row_ct} = tr.stim_rotation;
+%         subjData.target_mask_num{row_ct} = targetMask;
+%         subjData.chosen_mask_num{row_ct} = selectedMask;
+%         subjData.choice_correct{row_ct} = correct_choice;
+%         subjData.touch_time{row_ct} = rt;
+%         subjData.touch_point_x{row_ct} = tx;
+%         subjData.touch_point_y{row_ct} = ty;
+%         row_ct = row_ct + 1;
     end % trial loop
 
     % Flip again to sync us to the vertical retrace
@@ -476,8 +594,8 @@ for b=1:num_blocks
     if bn < num_blocks
         % End of block screen. 
         % We clear the screen once they have made their response
-        DrawFormattedText(window,blockEndMsg,...
-                            'center', 'center', black);
+        DrawFormattedText(window, blockEndMsg, ...
+                            'center', 'center', ptb.black);
         Screen('Flip', window);
         KbStrokeWait;
     end
@@ -489,7 +607,7 @@ vbl = Screen('Flip', window);
 
 % End of experiment screen. We clear the screen once they have made their
 % response
-DrawFormattedText(window, expEndMsg, 'center', 'center', black);
+DrawFormattedText(window, expEndMsg, 'center', 'center', ptb.black);
 Screen('Flip', window);
 KbStrokeWait;
 sca;
