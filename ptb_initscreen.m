@@ -10,6 +10,9 @@ ptb = struct();
 %bypass psychtoolbox sync tests
 Screen('Preference', 'SkipSyncTests', 2 );
 
+% Reduce error messages to increase frame rate
+Screen('Preference', 'Verbosity', 1);
+
 % Setup PTB with some default values
 PsychDefaultSetup(2);
 
