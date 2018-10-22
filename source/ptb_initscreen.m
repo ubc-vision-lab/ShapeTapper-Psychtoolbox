@@ -1,4 +1,4 @@
-function [ ptb ] = ptb_initscreen( )
+function [ ptb ] = ptb_initscreen( bg_color )
 %ptb_initscreen Inits Psychtoolbox and returns struct with window vars
 
 %----------------------------------------------------------------------
@@ -40,16 +40,35 @@ screens = Screen('Screens');
 % this. For help see: help max
 ptb.screenNumber = max(screens);
 
+% Hide cursor for touchscreen display (will use ShowCursor on program exit)
+HideCursor(ptb.screenNumber);
+
 % Define black and white (white will be 1 and black 0). This is because
 % luminace values are (in general) defined between 0 and 1. For help see:
 % help WhiteIndex and help BlackIndex
 ptb.white = WhiteIndex(ptb.screenNumber);
 ptb.black = BlackIndex(ptb.screenNumber);
 
-% Open an on screen window and color it black For help see: Screen
+% Test if bg_color has been defined as 'black' or 'white', or if an rgb
+% array has been specified. If not, then default to white.
+if ischar(bg_color{:})
+	if strcmp(bg_color,'white')
+        ptb.bg = ptb.white;
+    elseif strcmp(bg_color,'black')
+        ptb.bg = ptb.black;
+    else
+        ptb.bg = ptb.white;
+    end
+elseif isvector(bg_color) && length(bg_color) == 3
+    ptb.bg = bg_color;
+else
+    ptb.bg = ptb.white;
+end
+
+% Open an on screen window and color the background For help see: Screen
 % OpenWindow?
 [ptb.window, ptb.windowRect] = PsychImaging('OpenWindow', ...
-                                              ptb.screenNumber, ptb.white);
+                                              ptb.screenNumber, ptb.bg);
 
 % Retreive the maximum priority number and set max priority
 topPriorityLevel = MaxPriority(ptb.window);
@@ -65,7 +84,7 @@ Priority(topPriorityLevel);
 
 % Enable alpha blending for anti-aliasing For help see: Screen
 % BlendFunction? Also see: Chapter 6 of the OpenGL programming guide
-Screen('BlendFunction', ptb.window, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+Screen('BlendFunction', ptb.window, 'GL_SRC_ALPHA', 'GL_ONE_MINUS_SRC_ALPHA');
 
 % Set the text size
 Screen('TextSize', ptb.window, 40);

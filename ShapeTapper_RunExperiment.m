@@ -11,20 +11,25 @@
 % -Jamie Dunkle, UBC Vision Lab, 2018
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-function ShapeTapper_test(config_fname)
+function ShapeTapper_RunExperiment(config_fname)
 
 % Clear the workspace and the screen
 sca;
 close all;
 clearvars;
 
+addpath('Source');
+
 % Set messages to participant
 welcomeMsg = ['Welcome to the experiment!\n\n\n',...
-              'When you see a cross (+) in the center of the screen\n',...
-              'press and hold on the cross until the stimuli appear.\n',...
-              'Touch the stimuli which appears to be upside down\n\n\n'...
+              'Please wait for instructions \n',...
+              'from the experimenter to continue.\n\n\n'...
               'Press Any Key To Begin\n',...
               'Esc to exit at any time'];
+          
+practiceStartMsg = ['Now beginning practice block.\n\n\n',...
+                    'Press Any Key To Continue'];
+practiceEndMsg = 'Practice Block Finished\n\n\nPress Any Key To Continue';
           
 blockEndMsg = 'Block Finished\n\n\nPress Any Key To Continue';
 
@@ -35,32 +40,112 @@ timeoutMsg = 'Trial Time Expired.\n\n\nPress Any Key To Continue';
 % Acceptable stimulus image formats, must be compatible with imread()
 img_formats = {'.png', '.jpg'};
 
-
-% Subject name
-subj = 'test';
-
 % Specify directory containing stimulus images
 stim_dir = 'Image_Files\';
 
+% Data output path
+out_path = 'Data/';
+
+% Safety margin added to touchable area around stimulus images 
+% (touchable area is the defined as the smallest circle containing image)
+TOUCH_MARGIN = 1;
+
+%----------------------------------------------------------------------
+%                       Experimenter Setup
+%----------------------------------------------------------------------
+% Get demographics info
+part_dems = GetDemographics();
+
 % Specify directory containing config files
 switch nargin
-    case 0
-        [config_fname,config_path] = uigetfile('./Config_Files/*.csv',...
-                                       'Select an experiment config file');
-        config_fname = [config_path config_fname];
-    case 1
-        if isempty(config_fname) || isnan(config_fname)
-            config_fname = 'Config_Files\test_exp1.csv';
-        end
+   case 0
+       [config_fname,config_path] = uigetfile('./Config_Files/*.csv',...
+                                      'Select an experiment %%config file');
+       config_fname = [config_path config_fname];
+   case 1
+       if isempty(config_fname) || isnan(config_fname)
+           config_fname = 'Config_Files\test_config.csv';
+       end
 end
 
+% Extract config file name for demographics file
+[~, fname, ext] = fileparts(config_fname); 
+part_dems.config_name = [fname ext];
 
+% Save date for demographics file
+part_dems.experiment_date = char(datetime);
+
+% Read specified config file for this experiment
+config_dat = readtable(config_fname);
+
+% Read demographics file to check if participant ID has already bene used
+demog_fname = 'Data\Demographics_ShapeTapper.csv';
+if ~exist(demog_fname, 'file')
+    demog_header = 'ParticipantID,Handedness,Gender,Age,Config_File,Experiment_Time';
+    fid = fopen(demog_fname,'at');
+    if fid>0
+       fprintf(fid,'%s,',demog_header);
+       fprintf(fid,'\n');
+       fclose(fid);
+    end
+end
+
+demog_dat = readtable(demog_fname);
+matches_participant = strcmp(part_dems.id, demog_dat.ParticipantID);
+matches_config =  strcmp(part_dems.config_name, demog_dat.Config_File);
+if any(all([matches_participant matches_config],2))
+    match_idx = find(all([matches_participant matches_config],2));
+    
+    % Include the desired Default answer
+    opts.Interpreter = 'tex';
+    opts.Default = 'Cancel';
+    part_message = ['Participant \bf' part_dems.id ...
+                   '\rm has existing data for config \bf' ...
+                   strrep(part_dems.config_name,'_','\_') ...
+                   '\rm \newline \newline' ...
+                   'Would you like to continue this experiment, or start over?'];
+    answer = questdlg(part_message, 'Participant ID Already Exists!', ...
+                      'Continue', 'Start Over', 'Cancel', opts);
+    switch answer
+        case 'Continue'
+            old_data_fname = [out_path part_dems.id '/' fname '/' part_dems.id '_results_out.csv'];
+            old_data = readtable(old_data_fname,'Header', 1, 'Delimiter',',');
+            last_block = old_data{end, 2};
+            last_trial = old_data{end, 3};
+            opts2.Interpreter = 'tex';
+            opts2.Default = 'Cancel';
+            resume_message = ['Resuming experiment with config file ' ...
+                         strrep(part_dems.config_name,'_','\_') ...
+                          '\rm \newline' ...
+                          'Start from block ' num2str(last_block) ...
+                          ', trial ' num2str(last_trial) ' ?'];
+            resume_answer = questdlg(resume_message, 'Resume Experiment', ...
+                             'Resume', 'Cancel', opts2);
+            switch resume_answer
+                case 'Resume'
+                    dat_block_rows = config_dat.block_num == last_block;
+                    dat_trial_rows = config_dat.trial_num == last_trial;
+                    resume_row = find(all([dat_block_rows dat_trial_rows],2), 1, 'last');
+                    config_dat = config_dat(resume_row+1:end,:);
+                case 'Cancel'
+                    return
+            end
+        case 'Start Over'
+            old_path = [out_path part_dems.id '/' fname];
+            movefile([old_path '/'],[old_path '_old/']);
+        case 'Cancel'
+            return
+    end
+end
 %----------------------------------------------------------------------
 %                       PyschToolbox Setup
 %----------------------------------------------------------------------
+% Get background color from config file
+bg_color = config_dat.background_color(1);
+
 % Run function to init PsychToolbox screen and store relevant vars for
 % later rendering and timing
-ptb = ptb_initscreen();
+ptb = ptb_initscreen( bg_color );
 
 % Get window handle for PTB rendering
 window = ptb.window;
@@ -73,12 +158,8 @@ waitframes = ptb.waitframes;
 Screen('Flip', window);
 
 %----------------------------------------------------------------------
-%                     Stimuli - Load Config File
+%                     Load Stimuli Images
 %----------------------------------------------------------------------
-
-% Read specified config file for this experiment
-config_dat = readtable(config_fname);
-
 
 % -- LOAD IMAGES AS PSYCHTOOLBOX TEXTURES
 
@@ -96,7 +177,31 @@ stim_textures = ptb_loadtextures(stim_dir, img_names, img_formats, ptb);
 %----------------------------------------------------------------------
 %                     Make an output data table
 %----------------------------------------------------------------------
-     
+% Output demographics information
+%Define output name for demographics file
+demog_fname = [out_path 'Demographics_ShapeTapper.csv'];
+
+% Convert demographic info to cell array
+demog_data = struct2cell(part_dems);
+
+% Convert all cells to strings
+part_demog_data = cellfun(@num2str,demog_data,'UniformOutput',false);
+
+% Append strings
+demographic_row = strjoin(part_demog_data,',');
+
+% Write line to subject data output file
+fid = fopen(demog_fname,'at');
+if fid>0
+    fprintf(fid,'%s,',demographic_row);
+    fprintf(fid,'\n');
+    fclose(fid);
+end
+
+% Subj data output path
+subj_out_path = [out_path part_dems.id '/' fname '/'];
+mkdir(subj_out_path);
+
 % Parse and count the total number of trials specified
 tot_num_trials = 0;
 blocks = unique(config_dat.block_num);
@@ -123,16 +228,22 @@ data_columns = {'Subject',...
                 'target_mask_name',...
                 'target_center_x',...
                 'target_center_y',...
+                'target_size_x',...
+                'target_size_y',...
                 'target_rotation',...
                 'chosen_mask_name',... 
                 'chosen_center_x',...
                 'chosen_center_y',...
+                'chosen_size_x',...
+                'chosen_size_y',...
                 'chosen_rotation',...
                 'target_mask_num',...
                 'chosen_mask_num',...
                 'choice_correct',...
                 'touch_point_x',...
                 'touch_point_y',...
+                'touch_point_relative_x',...
+                'touch_point_relative_y',...
                 'trial_time_elapsed',...
                 'rt_target_to_choice',...
                 'rt_target_to_saccade',...
@@ -145,21 +256,23 @@ subjData = cell2table(cell(tot_num_trials, length(data_columns)),...
 
 % Counter for correct row indexing when writing output
 row_ct = 1;
-           
-out_path = 'Data/';
 
 % Set output file name
-subj_data_fname = [out_path subj '_out.csv'];
-fid = fopen( subj_data_fname, 'wt+' );
-if fid>0
-    fprintf(fid,strjoin(data_columns,','));
-    fprintf(fid,'\n');
-    fclose(fid);
+subj_data_fname = [subj_out_path part_dems.id '_results_out.csv'];
+if ~exist(subj_data_fname, 'file')
+    fid = fopen( subj_data_fname, 'wt+' );
+    if fid>0
+        fprintf(fid,strjoin(data_columns,','));
+        fprintf(fid,'\n');
+        fclose(fid);
+    end
 end
 
 %----------------------------------------------------------------------
 %                       Experimental loop
 %----------------------------------------------------------------------
+
+abort_experiment = false;
 
 % Animation Loop -- here we render and display all blocks & trials
 % specified in the config file, and save results
@@ -170,7 +283,20 @@ for b=1:num_blocks
     % If this is the very  first trial, present a start screen and wait
     % for a key-press
     if b == 1
-        DrawFormattedText(window,welcomeMsg,'center','center',ptb.black);
+        % Set text and background color to match first trial
+        welcome_bg = ptb.white;
+        welcome_text = ptb.black;
+        stim_bg_color = cell2mat(config_dat.background_color(1));
+        if ischar(stim_bg_color)
+            if strcmp(stim_bg_color,'black')
+                welcome_bg = ptb.black;
+                welcome_text = ptb.white;
+            end
+        end
+        Screen('FillRect', window, welcome_bg);
+        
+        % Draw welcome text
+        DrawFormattedText(window,welcomeMsg,'center','center', welcome_text);
         Screen('Flip', window);
 
         % Listen for Esc key to abort experiment
@@ -192,10 +318,41 @@ for b=1:num_blocks
 
     % Calculate total number of trials
     num_trials = length(trial_list);
+    
+    % Display practice block message, if applicable
+    if block_dat.is_practice_block(1)
+        block_bg = ptb.white;
+        block_text = ptb.black;
+        stim_bg_color = cell2mat(block_dat.background_color(1));
+        if ischar(stim_bg_color)
+            if strcmp(stim_bg_color,'black')
+                block_bg = ptb.black;
+                block_text = ptb.white;
+            end
+        end
+        Screen('FillRect', window, block_bg);
 
+        % Draw practice block or generic block end message
+        DrawFormattedText(window, practiceStartMsg, ...
+                        'center', 'center', block_text);
+                    
+        Screen('Flip', window);
+        
+        % Listen for Esc key to abort experiment
+        [~, keyCode, ~] = KbStrokeWait;
+        if keyCode(ptb.escapeKey)
+            sca;
+            return;
+        end
+    end
+    
     % TRIAL LOOP
     for t=1:num_trials
 
+        if abort_experiment
+            break
+        end
+        
         % -- Pre-trial initialization: event schedules, calculate masks --
 
         % Collect all trial numbers
@@ -207,12 +364,12 @@ for b=1:num_blocks
         % Calculate total number of frames for current trial
         trial_frames  = ceil(max(trial_dat.trial_max_time) / ptb.ifi);
 
-        % Convert cell array of stim names to char arrays
-        stim_img_names = cell2mat(trial_dat.stim_img_name);
+        % Extract array of stim names
+        stim_img_names = trial_dat.stim_img_name;
         
         % Make event schedule arrays, which will allow for rapid checking
         % of which stimuli to render for each frame
-        [num_stims, ~] = size(stim_img_names);
+        num_stims = size(stim_img_names, 1);
         stim_schedule = zeros(num_stims, trial_frames);
         mask_schedule = zeros(num_stims, trial_frames);
         fixation_schedule = zeros(num_stims, trial_frames);
@@ -220,8 +377,13 @@ for b=1:num_blocks
         % Initialize counters for fixation durations
         fixation_counter = zeros(num_stims, 3);
 
+        % Initialize record of stim displayed
+        stim_displayed = zeros(num_stims, 1);
+        
         % Initialize bounding rectangle for each stimulus
         stim_bounds = zeros(num_stims, 4);
+        stim_centers = zeros(num_stims, 2);
+        stim_radius = zeros(num_stims, 1);
 
         % Initialize mask arrays for each stimlus
         dotPosMatrix = cell(1,num_stims);
@@ -270,11 +432,20 @@ for b=1:num_blocks
             rect = [0 0 st.stim_size_x st.stim_size_y] * ptb.ppcm;
 
             % Offset rectangle to stimulus center point
-            rect = CenterRectOnPoint(rect, st.stim_cent_x, st.stim_cent_y);
+            stim_cx_px = st.stim_cent_x * ptb.screenXpixels;
+            stim_cy_px = st.stim_cent_y * ptb.screenYpixels;
+            rect = CenterRectOnPoint(rect, stim_cx_px, stim_cy_px);
 
             % Store rectangle in stim_bounds array for texture rendering
             stim_bounds(s,:) = rect;
 
+            % Calculate diagonal and center in pixels for touch detection
+            stim_size_x_px = st.stim_size_x * ptb.ppcm;
+            stim_size_y_px = st.stim_size_y * ptb.ppcm;
+            stim_centers(s,:) = [stim_cx_px stim_cy_px];
+            stim_radius(s) = sqrt(stim_size_x_px^2 + stim_size_y_px^2)/2 + ...
+                                    (TOUCH_MARGIN*ptb.ppcm);
+            
             % Make a dotPositionMatrix, dotSize, dotColor array for mask
             if st.mask_fit == 1
                 % Draw mask dots fitted to shape bounds
@@ -298,7 +469,7 @@ for b=1:num_blocks
 
             % Center mask positions relative to stimulus location
             [~,c]=size(mask_pos);
-            mask_pos = mask_pos - [repmat(st.stim_cent_x,1,c); repmat(st.stim_cent_y,1,c)];
+            mask_pos = mask_pos - [repmat(stim_cx_px,1,c); repmat(stim_cy_px,1,c)];
 
             % -- Scale mask dots to meet requested margin
 
@@ -321,7 +492,7 @@ for b=1:num_blocks
 
             % Reapply offset to mask positions
             [~,c]=size(mask_pos);
-            mask_pos = mask_pos + [repmat(st.stim_cent_x,1,c); repmat(st.stim_cent_y,1,c)];
+            mask_pos = mask_pos + [repmat(stim_cx_px,1,c); repmat(stim_cy_px,1,c)];
 
             % Store mask in cell array for rendering in trial presentation
             dotPosMatrix{s} = mask_pos;
@@ -357,9 +528,6 @@ for b=1:num_blocks
         
         % State variables which control response time markers
         [start_saccade, start_fingerlift, start_target_onset] = deal(false);
-%         
-%         % State variables which control response time markers
-%         [start_rt1, end_rt1, start_rt2, end_rt2] = deal(false);
         
         % Cue to determine whether a response has been made
         hasSelected = false;
@@ -372,9 +540,18 @@ for b=1:num_blocks
         frame = 1;
         stim_sched_frame = 1;
         
+        % This state is true prior to target onset, false after (used for
+        % reaction time calculation)
+        pre_target = 1;
+        
         % If we have passed fixation requirement, save this state as we
         % will begin reactime time on saccade/finger lift
         post_fix = 0;
+        
+        % Detect starting touch/gaze and require lift/saccade to begin
+        % recording data
+        touch_on_start = 0;
+        gaze_on_start = 0;
         
         % -- Display trial stimuli, record responses ----------------------
 
@@ -390,10 +567,29 @@ for b=1:num_blocks
                 sca;
                 return
             end
+            
+            % Note when a background color change has occurred in the
+            % current frame
+            bg_color_change = false;
 
             % Get the current position of the mouse
             [tx, ty, buttons] = GetMouse(window);
             is_touch = any(buttons ~= 0);
+
+            % Detect touch/gaze on trial start
+            if frame == 1 && is_touch
+                touch_on_start = true;
+            end
+            
+            % If trial started with touch, disable is_touch and require
+            % a finger lift to register a new touch
+            if touch_on_start
+                if is_touch
+                    is_touch = false;
+                else
+                    touch_on_start = false;
+                end
+            end
 
             % We clamp the values at the maximum values of the screen
             % in X and Y in case people have two monitors connected.
@@ -404,7 +600,7 @@ for b=1:num_blocks
             trial_touch_samples(1, frame) = tx;
             trial_touch_samples(2, frame) = ty;
             trial_touch_samples(3, frame) = is_touch;
-
+            
             % Get current gaze value
             % TBD
             
@@ -437,11 +633,26 @@ for b=1:num_blocks
             % Test each active fixation for gaze/touch and iterate counters       
             active_fixations = find(fixation_counter(:,3) == true, 1);
             if isempty(active_fixations)
-            	isFixation = false;
-                post_fix = trial_dat.stim_is_target(targetMask);
+            	if isFixation
+                    isFixation = false;
+                    post_fix = 1;
+                end
             else
                 for f=1:length(active_fixations)
                     fidx = active_fixations(f);
+                    
+                    % Detect if backgroudnd color changed
+                    if ~bg_color_change
+                        stim_bg = ptb.white;
+                        stim_bg_color = cell2mat(trial_dat.background_color(fidx));
+                        if ischar(stim_bg_color)
+                            if strcmp(stim_bg_color,'black')
+                                stim_bg = ptb.black;
+                            end
+                        end
+                        Screen('FillRect', window, stim_bg);
+                        bg_color_change = true;
+                    end
                     
                     % Render fixation image
                     fix_name = char(trial_dat.stim_img_name(fidx));
@@ -459,7 +670,7 @@ for b=1:num_blocks
                     % If fixation is touch type check for touch, reset if
                     % touch lifted
                     if fixation_counter(fidx,4) == 2
-                        if IsInRect(tx, ty, dotBoundingRect{fidx}) && is_touch
+                        if IsInRect(tx, ty, dotBoundingRect{fidx})% && is_touch
                             fixation_counter(fidx,2) = fixation_counter(fidx,2) + 1;
                         else
                             fixation_counter(fidx,2) = 0;
@@ -474,50 +685,78 @@ for b=1:num_blocks
                 end
             end
             
+            
             % Check image and mask schedules and render anything to screen
             % that is scheduled to be shown on the current frame
-            for s=1:num_stims
-                if stim_schedule(s, stim_sched_frame) == 1
-                    stim_name = char(trial_dat.stim_img_name(s));
-                    
-                    % Display stim
-                    Screen('DrawTextures', window,...
-                            stim_textures(stim_name),[],...
-                            stim_bounds(s,:), trial_dat.stim_rotation(s));
-                    
-                    % Record stim presentation in global frame counter 
-                    stim_presentations(s, frame) = 1;
-                    
-                    % If stim is target, begin reaction time counter
-                    if s == targetMask
-                        start_target_onset = true;
-                    end
-                end % image scheduled
-                if mask_schedule(s, stim_sched_frame) == 1
-                    % Draw mask dots
-                    Screen('DrawDots', window, dotPosMatrix{s},...
-                            dotSizes{s}, dotColors{s}, [], 2);
-                    
-                    % Record mask presentation in global frame counter
-                    % Stim only = 1, mask only = 2, stim & mask = 3
-                    stim_presentations(s, frame) = stim_presentations(s, frame) + 2;
-                        
-                    % Check for collisions.
-                    if trial_dat.mask_touchable(s) == 1
-                        if IsInRect(tx, ty, dotBoundingRect{s}) && is_touch
-                            hasSelected = true;
-                            selectedMask = s;
-                        end % touched stim mask
-                    end % stim mask touchable
-                end % mask scheduled
-            end % stim loop
+            if ~isFixation
+                for s=1:num_stims
+                    if stim_schedule(s, stim_sched_frame) == 1
+                        stim_name = char(trial_dat.stim_img_name(s));
 
+                        % Detect if backgroudnd color changed
+                        if ~bg_color_change
+                            stim_bg = ptb.white;
+                            stim_bg_color = cell2mat(trial_dat.background_color(s));
+                            if ischar(stim_bg_color)
+                                if strcmp(stim_bg_color,'black')
+                                    stim_bg = ptb.black;
+                                end
+                            end
+                            Screen('FillRect', window, stim_bg);
+                            bg_color_change = true;
+                        end
+
+                        % Display stim
+                        Screen('DrawTextures', window,...
+                                stim_textures(stim_name),[],...
+                                stim_bounds(s,:), trial_dat.stim_rotation(s));
+
+                        % Record stim presentation in global frame counter 
+                        stim_presentations(s, frame) = 1;
+                        stim_displayed(s) = 1;
+                        
+                        % If stim is target, begin reaction time counter
+                        if s == targetMask && pre_target
+                            start_target_onset = true;
+                        end
+                    end % image scheduled
+                    if mask_schedule(s, stim_sched_frame) == 1
+                        % Draw mask dots
+                        Screen('DrawDots', window, dotPosMatrix{s},...
+                                dotSizes{s}, dotColors{s}, [], 2);
+
+                        % Record mask presentation in global frame counter
+                        % Stim only = 1, mask only = 2, stim & mask = 3
+                        stim_presentations(s, frame) = stim_presentations(s, frame) + 2;
+                    end % mask scheduled
+                end % stim loop
+                % Check for collisions
+                for s=1:num_stims
+                    if stim_displayed(s) && trial_dat.stim_is_touchable(s) == 1
+                            if ptb_in_circ(stim_centers(s,:), [tx ty], stim_radius(s)) && is_touch
+                                hasSelected = true;
+                                selectedMask = s;
+                            end % touched stim
+                    end % image displayed & touchable
+                end
+            end % if fixation pause
+                
             % Flip to the screen
             [vbl, sot, flip, miss, ~] = Screen('Flip', window, vbl + (waitframes - 0.5) * ifi);
-            
+                        
             % Store exact timestamp and max error for current frame
             trial_timestamps(:, frame) = [vbl, sot, flip, miss];
             
+            % If missed frame, iterate 2 frames to stay on track.
+            missed_frame = (miss > 0);
+            next_frame = 1 + missed_frame;
+            
+            % If missed frame, copy fixation events to subsequent frame so
+            % as not to skip them.
+            if missed_frame && (frame + 1 < trial_frames)
+                fixation_schedule(:,frame+2) = fixation_schedule(:,frame+1);
+            end
+          
             % If a touchable mask has been touched, store response time
             if hasSelected == true
                 rt_target_to_choice = frame - rt_start_target_onset;
@@ -529,21 +768,26 @@ for b=1:num_blocks
             if start_target_onset
                 rt_start_target_onset = frame;
                 start_target_onset = false;
+                pre_target = false;
             end
             
-            % If saccade occurs, note time & start rt counter
-            if start_saccade
-                rt_start_saccade = frame;
-                rt_target_to_saccade = frame - rt_start_target_onset;
-                start_saccade = false;
-            end
-            
-            % If finger lift occurs, note time & start rt counter
-            if start_fingerlift
-                rt_start_fingerlift = frame;
-                rt_target_to_fingerlift = frame - rt_start_target_onset;
-                start_fingerlift = false;
-            end
+            % If a fixation has occured, record finger lift or saccade
+            % reaction time
+            if post_fix
+                % If saccade occurs, note time & start rt counter
+                if start_saccade
+                    rt_start_saccade = frame;
+                    rt_target_to_saccade = frame - rt_start_target_onset;
+                    start_saccade = false;
+                end
+
+                % If finger lift occurs, note time & start rt counter
+                if start_fingerlift
+                    rt_start_fingerlift = frame;
+                    rt_target_to_fingerlift = frame - rt_start_target_onset;
+                    start_fingerlift = false;
+                end
+            end % if post_fix
             
             % End trial if selection has been made
             if hasSelected == true
@@ -553,11 +797,11 @@ for b=1:num_blocks
                 
             % If not in a fixation pause, iterate stim schedule
             if ~isFixation
-                stim_sched_frame = stim_sched_frame + 1;
+                stim_sched_frame = stim_sched_frame + next_frame;
             end
             
             % Iterate trial frame counter
-            frame = frame + 1;
+            frame = frame + next_frame;
             
         end % frame loop
         
@@ -566,11 +810,27 @@ for b=1:num_blocks
         
         % If trial timed out, display time out message
         if trial_frames_elapsed >= trial_frames
-            % We clear the screen once they have made their response
-            DrawFormattedText(window, timeoutMsg, ...
-                                'center', 'center', ptb.black);
+        	% Set text and background color to match first trial
+            timeout_bg = ptb.white;
+            timeout_text = ptb.black;
+            stim_bg_color = cell2mat(trial_dat.background_color(num_stims));
+            if ischar(stim_bg_color)
+                if strcmp(stim_bg_color,'black')
+                    timeout_bg = ptb.black;
+                    timeout_text = ptb.white;
+                end
+            end
+            Screen('FillRect', window, timeout_bg);
+
+            % Draw timeout text
             Screen('Flip', window);
-            KbStrokeWait;
+            DrawFormattedText(window, timeoutMsg, ...
+                                'center', 'center', timeout_text);
+            Screen('Flip', window);
+            [~, keyCode, ~] = KbStrokeWait;
+            if keyCode(ptb.escapeKey)
+                abort_experiment = true;
+            end
         end
         
         % Output frame-by-frame timestamp/presentation record
@@ -588,39 +848,69 @@ for b=1:num_blocks
         timerecord_out_labels = [timestamp_labels stim_sched_labels touch_labels gaze_labels];
         timestamp_out = array2table(timestamp_record, 'VariableNames', timerecord_out_labels);
         
-        ts_out_name = [out_path subj '_timestamp_schedule_' 'b' num2str(bn, '%02d') '_t' num2str(tn, '%02d') '.csv'];
+        ts_out_name = [subj_out_path part_dems.id '_timestamp_schedule_' 'b' num2str(bn, '%02d') '_t' num2str(tn, '%02d') '.csv'];
         writetable(timestamp_out, ts_out_name, 'Delimiter', ',', 'QuoteStrings', true);
         
         % -- Output data for current trial --------------------------------
 
         % Record the trial data into out data matrix
-        subjData.Subject{row_ct} = subj;
+        subjData.Subject{row_ct} = part_dems.id;
         subjData.BlockNum{row_ct} = bn;
-        subjData.TrialNum{row_ct} = row_ct;
+        subjData.TrialNum{row_ct} = tn;
         subjData.BadTrial{row_ct} = 0; % TBD
         
         % Extract target stimulus info from trial stim table if possible
         if ~isnan(targetMask)
             tr = trial_dat(targetMask,:);
             subjData.target_mask_name{row_ct} = cell2mat(tr.stim_img_name);
-            subjData.target_center_x{row_ct} = tr.stim_cent_x;
-            subjData.target_center_y{row_ct} = tr.stim_cent_y;
+            subjData.target_center_x{row_ct} = tr.stim_cent_x*ptb.screenXpixels;
+            subjData.target_center_y{row_ct} = tr.stim_cent_y*ptb.screenYpixels;
+            subjData.target_size_x{row_ct} = tr.stim_size_x*ptb.ppcm;
+            subjData.target_size_y{row_ct} = tr.stim_size_y*ptb.ppcm;
             subjData.target_rotation{row_ct} = tr.stim_rotation;
             subjData.target_mask_num{row_ct} = targetMask;
         end
         
         % Extract chosen stimulus info from trial stim table if possible
         if ~isnan(selectedMask)
+            %Extract chosen stimulus info
             ch = trial_dat(selectedMask,:);
+            
+            % Convert center to pixels
+            ch_cent_x_px = ch.stim_cent_x*ptb.screenXpixels;
+            ch_cent_y_px = ch.stim_cent_y*ptb.screenYpixels;
+            
+            % Get chosen stim rotation
+            c_rot = ch.stim_rotation;
+            
+            % Save necessary stim info
             subjData.chosen_mask_name{row_ct} = cell2mat(ch.stim_img_name);
-            subjData.chosen_center_x{row_ct} = ch.stim_cent_x;
-            subjData.chosen_center_y{row_ct} = ch.stim_cent_y;
-            subjData.chosen_rotation{row_ct} = ch.stim_rotation;
+            subjData.chosen_center_x{row_ct} = ch_cent_x_px;
+            subjData.chosen_center_y{row_ct} = ch_cent_y_px;
+            subjData.chosen_size_x{row_ct} = ch.stim_size_x*ptb.ppcm;
+            subjData.chosen_size_y{row_ct} = ch.stim_size_y*ptb.ppcm;
+            subjData.chosen_rotation{row_ct} = c_rot;
             subjData.chosen_mask_num{row_ct} = selectedMask;
+            
+            % -- Calculate relative touchpoint to chosen object --
+            % Remove offset by chosen center
+            tp_x_offset = tx - ch_cent_x_px;
+            tp_y_offset = ty - ch_cent_y_px;
+            % Create rotation matrix (reverse rotation of chosen stim)
+            R = [cosd(-c_rot) -sind(-c_rot); sind(-c_rot) cosd(-c_rot)];
+            tp_cent = [tp_x_offset; tp_y_offset];
+            % Reverse stim rotation to get touch point relative to center
+            tp_cent_rot = R*tp_cent;
+            % Offset by stim size (in pixels) and flip y-axis to get
+            % top-left = (0,0) coordinate system used in OpenCV analysis
+            tp_rel_x = tp_cent_rot(1) + (ch.stim_size_x*ptb.ppcm/2);
+            tp_rel_y = -(tp_cent_rot(2) - (ch.stim_size_x*ptb.ppcm/2));
+            % Save relative touchpoint in subject trial data
+        	subjData.touch_point_relative_x{row_ct} = tp_rel_x;
+            subjData.touch_point_relative_y{row_ct} = tp_rel_y;
         end
         
         subjData.choice_correct{row_ct} = correct_choice;
-        
         subjData.touch_point_x{row_ct} = tx;
         subjData.touch_point_y{row_ct} = ty;
         subjData.trial_time_elapsed{row_ct} = trial_frames_elapsed * ifi;
@@ -661,20 +951,40 @@ for b=1:num_blocks
 
     % Flip again to sync us to the vertical retrace
     Screen('Flip', window);
+    
+    if ~abort_experiment
+        if bn < num_blocks
+            % End of block screen. 
+            % Set text and background color to match first trial
+            block_bg = ptb.white;
+            block_text = ptb.black;
+            stim_bg_color = cell2mat(trial_dat.background_color(num_stims));
+            if ischar(stim_bg_color)
+                if strcmp(stim_bg_color,'black')
+                    block_bg = ptb.black;
+                    block_text = ptb.white;
+                end
+            end
+            Screen('FillRect', window, block_bg);
 
-    if bn < num_blocks
-        % End of block screen. 
-        % We clear the screen once they have made their response
-        DrawFormattedText(window, blockEndMsg, ...
-                            'center', 'center', ptb.black);
-        Screen('Flip', window);
-        [~, keyCode, ~] = KbStrokeWait;
-        if keyCode(ptb.escapeKey)
-            sca;
-            return;
-        end
-    end
-
+            % Draw practice block or generic block end message
+            if trial_dat.is_practice_block(1)
+            	DrawFormattedText(window, practiceEndMsg, ...
+                                'center', 'center', block_text);
+            else
+                % Draw block text
+                DrawFormattedText(window, blockEndMsg, ...
+                                'center', 'center', block_text);
+            end
+            Screen('Flip', window);
+            [~, keyCode, ~] = KbStrokeWait;
+            if keyCode(ptb.escapeKey)
+                sca;
+                return;
+            end
+        end % bn < num_blocks
+    end % abort_experiment
+    
 end % block loop
 
 % Flip again to sync us to the vertical retrace
@@ -682,7 +992,20 @@ Screen('Flip', window);
 
 % End of experiment screen. We clear the screen once they have made their
 % response
-DrawFormattedText(window, expEndMsg, 'center', 'center', ptb.black);
+% Set text and background color to match first trial
+eoe_bg = ptb.white;
+eoe_text = ptb.black;
+stim_bg_color = cell2mat(trial_dat.background_color(num_stims));
+if ischar(stim_bg_color)
+    if strcmp(stim_bg_color,'black')
+        eoe_bg = ptb.black;
+        eoe_text = ptb.white;
+    end
+end
+Screen('FillRect', window, eoe_bg);
+% Draw End of Experiment text
+DrawFormattedText(window, expEndMsg, 'center', 'center', eoe_text);
 Screen('Flip', window);
 KbStrokeWait;
+ShowCursor('arrow', window);
 sca;

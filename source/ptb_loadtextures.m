@@ -28,13 +28,15 @@ for i=1:length(img_names)
     [img, map, alpha] = imread(img_fname);
    
     % Create white background (may be changed to another value if needed)
-    white_bg = (ones(size(img))*255);
+    bg = (ones(size(img))*255*ptb.bg);
     
     if ~isempty(alpha)
-        % Scale alpha channel and apply background to transparent part of image
-        alphaMask = im2double(alpha); %scale between 0 and 1
-        img = im2uint8(white_bg.*repmat((1-alphaMask),[1 1 3]) + ...
-                       double(img).*repmat(alphaMask,[1 1 3]));
+%         % Scale alpha channel and apply background to transparent part of image
+%         alphaMask = im2double(alpha); %scale between 0 and 1
+%         img = im2uint8(bg.*repmat((1-alphaMask),[1 1 3]) + ...
+%                        double(img).*repmat(alphaMask,[1 1 3]));
+        % Add alpha channel to image matrix
+        img = cat(3, img, alpha);
     end
                    
     % Make the image into a texture, save object handle as property
