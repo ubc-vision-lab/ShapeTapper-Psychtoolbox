@@ -18,7 +18,11 @@ sca;
 close all;
 clearvars;
 
-addpath('Source');
+% Add source code path
+addpath('source');
+
+% Seed random number generator for participant ID
+rand('seed', sum(100 * clock));
 
 % Set messages to participant
 welcomeMsg = ['Welcome to the experiment!\n\n\n',...
@@ -346,9 +350,44 @@ for b=1:num_blocks
         end
     end
     
+    % Create vector to flag bad trials for repeat at end of block
+    bad_trials = zeros(num_trials,1);
+    
+    % Set trial counter
+    t = 1;
+    block_complete = false;
+    rpt_bad_trials = false;
+    
     % TRIAL LOOP
-    for t=1:num_trials
+    while ~block_complete
 
+        % If all trials have been presented
+        if t > num_trials
+           % If no bad trials, then complete block
+           if isempty(find(bad_trials))
+               rpt_bad_trials = false;
+               block_complete = true;
+               continue
+           else
+               % Begin looping through bad trials
+               rpt_bad_trials = true;
+           end
+        end
+        
+        % If we are repeating bad trials, then randomly present a bad trial
+        if rpt_bad_trials
+            bad_trials_remaining = find(bad_trials);
+            % If no bad trials, then complete block
+            if isempty(bad_trials_remaining)
+               rpt_bad_trials = false;
+               block_complete = true;
+               continue
+            else
+                rand_bad_trial = randi([1 length(bad_trials_remaining)]);
+                t = bad_trials_remaining(rand_bad_trial);
+            end   
+        end
+        
         if abort_experiment
             break
         end
@@ -393,7 +432,7 @@ for b=1:num_blocks
 
         % Declare target mask
         targetMask = NaN;
-        selectedMask = NaN;
+        selectedStim = NaN;
         correct_choice = false;
         
         % Populate stimulus schedules and mask vectors
@@ -733,11 +772,21 @@ for b=1:num_blocks
                 % Check for collisions
                 for s=1:num_stims
                     if stim_displayed(s) && trial_dat.stim_is_touchable(s) == 1
-                            if ptb_in_circ(stim_centers(s,:), [tx ty], stim_radius(s)) && is_touch
-                                hasSelected = true;
-                                selectedMask = s;
-                            end % touched stim
+                        if ptb_in_circ(stim_centers(s,:), [tx ty], stim_radius(s)) && is_touch
+                            hasSelected = true;
+                            selectedStim = s;
+                            if bad_trials(t)
+                                bad_trials(t) = false;
+                            end
+                        end% touched stim
                     end % image displayed & touchable
+                end
+                % Check for any non-stim touches, add trial to lsit of bad
+                % trials to repeat at end of block
+                if any(stim_displayed) && ~hasSelected && is_touch
+                    hasSelected = true;
+                    selectedStim = NaN;
+                    bad_trials(t) = true;
                 end
             end % if fixation pause
                 
@@ -791,7 +840,7 @@ for b=1:num_blocks
             
             % End trial if selection has been made
             if hasSelected == true
-                correct_choice = (selectedMask == targetMask);
+                correct_choice = (selectedStim == targetMask);
                 break
             end
                 
@@ -872,9 +921,9 @@ for b=1:num_blocks
         end
         
         % Extract chosen stimulus info from trial stim table if possible
-        if ~isnan(selectedMask)
+        if ~isnan(selectedStim)
             %Extract chosen stimulus info
-            ch = trial_dat(selectedMask,:);
+            ch = trial_dat(selectedStim,:);
             
             % Convert center to pixels
             ch_cent_x_px = ch.stim_cent_x*ptb.screenXpixels;
@@ -890,7 +939,7 @@ for b=1:num_blocks
             subjData.chosen_size_x{row_ct} = ch.stim_size_x*ptb.ppcm;
             subjData.chosen_size_y{row_ct} = ch.stim_size_y*ptb.ppcm;
             subjData.chosen_rotation{row_ct} = c_rot;
-            subjData.chosen_mask_num{row_ct} = selectedMask;
+            subjData.chosen_mask_num{row_ct} = selectedStim;
             
             % -- Calculate relative touchpoint to chosen object --
             % Remove offset by chosen center
@@ -908,12 +957,15 @@ for b=1:num_blocks
             % Save relative touchpoint in subject trial data
         	subjData.touch_point_relative_x{row_ct} = tp_rel_x;
             subjData.touch_point_relative_y{row_ct} = tp_rel_y;
+        else
+            % Non-stim touch, mark as bad trial
+            subjData.BadTrial{row_ct} = 1;
         end
         
         subjData.choice_correct{row_ct} = correct_choice;
         subjData.touch_point_x{row_ct} = tx;
         subjData.touch_point_y{row_ct} = ty;
-        subjData.trial_time_elapsed{row_ct} = trial_frames_elapsed * ifi;
+        subjData.trial_time_elapsed{row_ct} = (trial_frames_elapsed+1) * ifi;
         subjData.rt_target_to_choice{row_ct} = rt_target_to_choice * ifi;
         subjData.rt_target_to_saccade{row_ct} = rt_target_to_saccade * ifi;
         subjData.rt_saccade_to_choice{row_ct} = rt_saccade_to_choice * ifi;
@@ -947,6 +999,9 @@ for b=1:num_blocks
         
         % Iterate row counter for subject data
         row_ct = row_ct + 1;
+        
+        % Iterate trial counter
+        t = t + 1;
     end % trial loop
 
     % Flip again to sync us to the vertical retrace
