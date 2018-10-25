@@ -194,7 +194,7 @@ part_demog_data = cellfun(@num2str,demog_data,'UniformOutput',false);
 % Append strings
 demographic_row = strjoin(part_demog_data,',');
 
-% Write line to subject data output file
+% Write line to participant data output file
 fid = fopen(demog_fname,'at');
 if fid>0
     fprintf(fid,'%s,',demographic_row);
@@ -202,9 +202,9 @@ if fid>0
     fclose(fid);
 end
 
-% Subj data output path
-subj_out_path = [out_path part_dems.id '/' fname '/'];
-mkdir(subj_out_path);
+% Participant data output path
+part_out_path = [out_path part_dems.id '/' fname '/'];
+mkdir(part_out_path);
 
 % Parse and count the total number of trials specified
 tot_num_trials = 0;
@@ -225,24 +225,24 @@ for b=1:num_blocks
 end
 
 % Initialize output table
-data_columns = {'Subject',...
+data_columns = {'participant',...
                 'BlockNum',...
                 'TrialNum',...
                 'BadTrial',...
-                'target_mask_name',...
+                'target_image_name',...
                 'target_center_x',...
                 'target_center_y',...
                 'target_size_x',...
                 'target_size_y',...
                 'target_rotation',...
-                'chosen_mask_name',... 
+                'chosen_image_name',... 
                 'chosen_center_x',...
                 'chosen_center_y',...
                 'chosen_size_x',...
                 'chosen_size_y',...
                 'chosen_rotation',...
-                'target_mask_num',...
-                'chosen_mask_num',...
+                'target_image_num',...
+                'chosen_image_num',...
                 'choice_correct',...
                 'touch_point_x',...
                 'touch_point_y',...
@@ -255,16 +255,16 @@ data_columns = {'Subject',...
                 'rt_target_to_fingerlift',...
                 'rt_fingerlift_to_choice'};
 
-subjData = cell2table(cell(tot_num_trials, length(data_columns)),...
+partData = cell2table(cell(tot_num_trials, length(data_columns)),...
                       'VariableNames',data_columns);
 
 % Counter for correct row indexing when writing output
 row_ct = 1;
 
 % Set output file name
-subj_data_fname = [subj_out_path part_dems.id '_results_out.csv'];
-if ~exist(subj_data_fname, 'file')
-    fid = fopen( subj_data_fname, 'wt+' );
+part_data_fname = [part_out_path part_dems.id '_results_out.csv'];
+if ~exist(part_data_fname, 'file')
+    fid = fopen( part_data_fname, 'wt+' );
     if fid>0
         fprintf(fid,strjoin(data_columns,','));
         fprintf(fid,'\n');
@@ -716,7 +716,7 @@ for b=1:num_blocks
                         end % touched fixation mask
                     end
                     
-                    % If subject fixation duration exceeds requirement,
+                    % If participant fixation duration exceeds requirement,
                     % deactivate fixation
                     if fixation_counter(fidx,1) < fixation_counter(fidx,2)
                         fixation_counter(fidx,3) = false;
@@ -897,27 +897,27 @@ for b=1:num_blocks
         timerecord_out_labels = [timestamp_labels stim_sched_labels touch_labels gaze_labels];
         timestamp_out = array2table(timestamp_record, 'VariableNames', timerecord_out_labels);
         
-        ts_out_name = [subj_out_path part_dems.id '_timestamp_schedule_' 'b' num2str(bn, '%02d') '_t' num2str(tn, '%02d') '.csv'];
+        ts_out_name = [part_out_path part_dems.id '_timestamp_schedule_' 'b' num2str(bn, '%02d') '_t' num2str(tn, '%02d') '.csv'];
         writetable(timestamp_out, ts_out_name, 'Delimiter', ',', 'QuoteStrings', true);
         
         % -- Output data for current trial --------------------------------
 
         % Record the trial data into out data matrix
-        subjData.Subject{row_ct} = part_dems.id;
-        subjData.BlockNum{row_ct} = bn;
-        subjData.TrialNum{row_ct} = tn;
-        subjData.BadTrial{row_ct} = 0; % TBD
+        partData.participant{row_ct} = part_dems.id;
+        partData.BlockNum{row_ct} = bn;
+        partData.TrialNum{row_ct} = tn;
+        partData.BadTrial{row_ct} = 0; % TBD
         
         % Extract target stimulus info from trial stim table if possible
         if ~isnan(targetMask)
             tr = trial_dat(targetMask,:);
-            subjData.target_mask_name{row_ct} = cell2mat(tr.stim_img_name);
-            subjData.target_center_x{row_ct} = tr.stim_cent_x*ptb.screenXpixels;
-            subjData.target_center_y{row_ct} = tr.stim_cent_y*ptb.screenYpixels;
-            subjData.target_size_x{row_ct} = tr.stim_size_x*ptb.ppcm;
-            subjData.target_size_y{row_ct} = tr.stim_size_y*ptb.ppcm;
-            subjData.target_rotation{row_ct} = tr.stim_rotation;
-            subjData.target_mask_num{row_ct} = targetMask;
+            partData.target_image_name{row_ct} = cell2mat(tr.stim_img_name);
+            partData.target_center_x{row_ct} = tr.stim_cent_x*ptb.screenXpixels;
+            partData.target_center_y{row_ct} = tr.stim_cent_y*ptb.screenYpixels;
+            partData.target_size_x{row_ct} = tr.stim_size_x*ptb.ppcm;
+            partData.target_size_y{row_ct} = tr.stim_size_y*ptb.ppcm;
+            partData.target_rotation{row_ct} = tr.stim_rotation;
+            partData.target_image_num{row_ct} = targetMask;
         end
         
         % Extract chosen stimulus info from trial stim table if possible
@@ -933,13 +933,13 @@ for b=1:num_blocks
             c_rot = ch.stim_rotation;
             
             % Save necessary stim info
-            subjData.chosen_mask_name{row_ct} = cell2mat(ch.stim_img_name);
-            subjData.chosen_center_x{row_ct} = ch_cent_x_px;
-            subjData.chosen_center_y{row_ct} = ch_cent_y_px;
-            subjData.chosen_size_x{row_ct} = ch.stim_size_x*ptb.ppcm;
-            subjData.chosen_size_y{row_ct} = ch.stim_size_y*ptb.ppcm;
-            subjData.chosen_rotation{row_ct} = c_rot;
-            subjData.chosen_mask_num{row_ct} = selectedStim;
+            partData.chosen_image_name{row_ct} = cell2mat(ch.stim_img_name);
+            partData.chosen_center_x{row_ct} = ch_cent_x_px;
+            partData.chosen_center_y{row_ct} = ch_cent_y_px;
+            partData.chosen_size_x{row_ct} = ch.stim_size_x*ptb.ppcm;
+            partData.chosen_size_y{row_ct} = ch.stim_size_y*ptb.ppcm;
+            partData.chosen_rotation{row_ct} = c_rot;
+            partData.chosen_image_num{row_ct} = selectedStim;
             
             % -- Calculate relative touchpoint to chosen object --
             % Remove offset by chosen center
@@ -954,27 +954,27 @@ for b=1:num_blocks
             % top-left = (0,0) coordinate system used in OpenCV analysis
             tp_rel_x = tp_cent_rot(1) + (ch.stim_size_x*ptb.ppcm/2);
             tp_rel_y = -(tp_cent_rot(2) - (ch.stim_size_x*ptb.ppcm/2));
-            % Save relative touchpoint in subject trial data
-        	subjData.touch_point_relative_x{row_ct} = tp_rel_x;
-            subjData.touch_point_relative_y{row_ct} = tp_rel_y;
+            % Save relative touchpoint in participant trial data
+        	partData.touch_point_relative_x{row_ct} = tp_rel_x;
+            partData.touch_point_relative_y{row_ct} = tp_rel_y;
         else
             % Non-stim touch, mark as bad trial
-            subjData.BadTrial{row_ct} = 1;
+            partData.BadTrial{row_ct} = 1;
         end
         
-        subjData.choice_correct{row_ct} = correct_choice;
-        subjData.touch_point_x{row_ct} = tx;
-        subjData.touch_point_y{row_ct} = ty;
-        subjData.trial_time_elapsed{row_ct} = (trial_frames_elapsed+1) * ifi;
-        subjData.rt_target_to_choice{row_ct} = rt_target_to_choice * ifi;
-        subjData.rt_target_to_saccade{row_ct} = rt_target_to_saccade * ifi;
-        subjData.rt_saccade_to_choice{row_ct} = rt_saccade_to_choice * ifi;
-        subjData.rt_target_to_fingerlift{row_ct} = rt_target_to_fingerlift * ifi;
-        subjData.rt_fingerlift_to_choice{row_ct} = rt_fingerlift_to_choice * ifi;
+        partData.choice_correct{row_ct} = correct_choice;
+        partData.touch_point_x{row_ct} = tx;
+        partData.touch_point_y{row_ct} = ty;
+        partData.trial_time_elapsed{row_ct} = (trial_frames_elapsed+1) * ifi;
+        partData.rt_target_to_choice{row_ct} = rt_target_to_choice * ifi;
+        partData.rt_target_to_saccade{row_ct} = rt_target_to_saccade * ifi;
+        partData.rt_saccade_to_choice{row_ct} = rt_saccade_to_choice * ifi;
+        partData.rt_target_to_fingerlift{row_ct} = rt_target_to_fingerlift * ifi;
+        partData.rt_fingerlift_to_choice{row_ct} = rt_fingerlift_to_choice * ifi;
         
-        % -- Write trial data out to one line of subject data file --------
+        % -- Write trial data out to one line of participant data file --------
         % Extract row corresponding to current trial
-        trial_data = subjData{row_ct,:};
+        trial_data = partData{row_ct,:};
         
         % Fill any empty entries with NaN
         for idx = 1:numel(trial_data)
@@ -989,15 +989,15 @@ for b=1:num_blocks
         % Append strings
         trial_row = strjoin(trial_data,',');
         
-        % Write line to subject data output file
-        fid = fopen(subj_data_fname,'at');
+        % Write line to participant data output file
+        fid = fopen(part_data_fname,'at');
         if fid>0
             fprintf(fid,'%s,',trial_row);
             fprintf(fid,'\n');
             fclose(fid);
         end
         
-        % Iterate row counter for subject data
+        % Iterate row counter for participant data
         row_ct = row_ct + 1;
         
         % Iterate trial counter
