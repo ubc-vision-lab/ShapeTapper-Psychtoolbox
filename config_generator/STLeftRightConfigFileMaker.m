@@ -1,16 +1,20 @@
-%HELP for function STODDBALLCONFIGMAKER. This function makes a 3 image odd-ball
-%comma-separated configuration file for the Matlab-based ShapeTapper program and stores
-%it to disk.
+%HELP for function STLEFTRIGHTCONFIGMAKER. This function makes a 2-image per trial
+%left/right (same/different) 2AFC configuration file for the Matlab-based ShapeTapper
+%program and stores it to disk.
+%
+%Author: Rob Whitwell
 %
 %@PARAMS
-%           'factors' - a 3-element array in which each element is a factor the value of which
+%           'factors' - an array in which each element is a factor the value of which
 %               specifies the number of levels in that given factor. Assumes the following
-%               structure: (1) number of shapes; (2) number of unique orientations; (3)
-%               the quadrant in which the target (oddball) shape should occur.
-%           'ncp' - the number of times each unique condition occurs in the trial order
-%           'repLim' - the maximum number of back-to-back repetitions of any given unique
-%               condition that is permitted to occur in the condition order.
-%           'blocks' - the number of blocks of trials in the trial order
+%               column structure 1:number of shapes; 2:number of unique orientations;
+%               3:the quadrant of first image of the pair (1-4); 4:the same (1) vs.
+%               different (2) nature of the pair of shapes.
+%           'n' - the number of times each unique condition occurs in the trial order
+%           'r' - the maximum number of back-to-back repetitions of any given unique
+%               condition that is permitted to occur in the condition order. r=1 would
+%               mean no repeats permitted.
+%           'b' - the number of blocks of trials in the trial order
 %           'scrnXPxls - the width of the display screen (in pixels)
 %           'scrnYPxls - the height of the display screen (in pixels)
 %           'dpi' - the dots per inch of the display screen
@@ -18,17 +22,17 @@
 %           'cnfFNm' - the configuration file name. If empty then the trial order is not
 %               saved to disk.
 
-function [A] = STOddBallConfigFileMaker(factors,ncp,repLim,blocks,scrnXPxls,scrnYPxls,dpi,maxDispImgSizeCm,cnfFNm)
+function [A] = STLeftRightConfigFileMaker(factors,ncp,repLim,blocks,scrnXPxls,scrnYPxls,dpi,maxDispImgSizeCm,cnfFNm)
 
 %the number of events (images to present) per trial
-EVENTSPERTRIAL = 3;
+EVENTSPERTRIAL = 2;
 
 %image file extension
 IMGEXT = '*.png';
 
 %the background colour
 BCKGRNDCLRNM = 'black';
-STIMDUR = 10; %(1/30)*10; 
+STIMDUR = 10; %(1/30)*10;
 TRIALDUR = 10;
 STIMON = [.3 .7]; %stimulus onset varies.
 MSKCLR = 0; %mask colour.
@@ -116,28 +120,28 @@ for i = 1:numImages
     dispImgDgnlCm(i) = norm([dispImgSzXCm(i) dispImgSzYCm(i)]);
    
     %X min limits (each quadrant)
-    minMaxImgCntrXLmtsCm(i,1,1) = MRGN+(dispImgDgnlCm(i)/2);
-    minMaxImgCntrXLmtsCm(i,1,2) = (scrnXCm/2)+MRGN+(dispImgDgnlCm(i)/2);
-    minMaxImgCntrXLmtsCm(i,1,3) = (scrnXCm/2)+MRGN+(dispImgDgnlCm(i)/2);
-    minMaxImgCntrXLmtsCm(i,1,4) = MRGN+(dispImgDgnlCm(i)/2);
+    minMaxImgCntrXLmtsCm(i,1,1) = MRGN+(dispImgDgnlCm(i)/2); %left
+    minMaxImgCntrXLmtsCm(i,1,2) = (scrnXCm/2)+MRGN+(dispImgDgnlCm(i)/2); %right
+    minMaxImgCntrXLmtsCm(i,1,3) = (scrnXCm/2)+MRGN+(dispImgDgnlCm(i)/2); %right
+    minMaxImgCntrXLmtsCm(i,1,4) = MRGN+(dispImgDgnlCm(i)/2); %left
     
     %X max limits (each quadrant)
-    minMaxImgCntrXLmtsCm(i,2,1) = (scrnXCm/2)-MRGN-(dispImgDgnlCm(i)/2);
-    minMaxImgCntrXLmtsCm(i,2,2) = scrnXCm-MRGN-(dispImgDgnlCm(i)/2);
-    minMaxImgCntrXLmtsCm(i,2,3) = scrnXCm-MRGN-(dispImgDgnlCm(i)/2);
-    minMaxImgCntrXLmtsCm(i,2,4) = (scrnXCm/2)-MRGN-(dispImgDgnlCm(i)/2);
+    minMaxImgCntrXLmtsCm(i,2,1) = (scrnXCm/2)-MRGN-(dispImgDgnlCm(i)/2); %left
+    minMaxImgCntrXLmtsCm(i,2,2) = scrnXCm-MRGN-(dispImgDgnlCm(i)/2); %right
+    minMaxImgCntrXLmtsCm(i,2,3) = scrnXCm-MRGN-(dispImgDgnlCm(i)/2); %right
+    minMaxImgCntrXLmtsCm(i,2,4) = (scrnXCm/2)-MRGN-(dispImgDgnlCm(i)/2); %left
     
     %Y min limits (each quadrant)
-    minMaxImgCntrYLmtsCm(i,1,1) = (scrnYCm/2)+MRGN+(dispImgDgnlCm(i)/2);
-    minMaxImgCntrYLmtsCm(i,1,2) = (scrnYCm/2)+MRGN+(dispImgDgnlCm(i)/2);
-    minMaxImgCntrYLmtsCm(i,1,3) = MRGN+(dispImgDgnlCm(i)/2);
-    minMaxImgCntrYLmtsCm(i,1,4) = MRGN+(dispImgDgnlCm(i)/2);
+    minMaxImgCntrYLmtsCm(i,1,1) = (scrnYCm/2)+MRGN+(dispImgDgnlCm(i)/2); %bottom
+    minMaxImgCntrYLmtsCm(i,1,2) = (scrnYCm/2)+MRGN+(dispImgDgnlCm(i)/2); %bottom
+    minMaxImgCntrYLmtsCm(i,1,3) = MRGN+(dispImgDgnlCm(i)/2); %top
+    minMaxImgCntrYLmtsCm(i,1,4) = MRGN+(dispImgDgnlCm(i)/2); %top
     
     %Y max limits (each quadrant)
-    minMaxImgCntrYLmtsCm(i,2,1) = scrnYCm-MRGN-(dispImgDgnlCm(i)/2);
-    minMaxImgCntrYLmtsCm(i,2,2) = scrnYCm-MRGN-(dispImgDgnlCm(i)/2);
-    minMaxImgCntrYLmtsCm(i,2,3) = (scrnYCm/2)-MRGN-(dispImgDgnlCm(i)/2);
-    minMaxImgCntrYLmtsCm(i,2,4) = (scrnYCm/2)-MRGN-(dispImgDgnlCm(i)/2); 
+    minMaxImgCntrYLmtsCm(i,2,1) = scrnYCm-MRGN-(dispImgDgnlCm(i)/2); %bottom
+    minMaxImgCntrYLmtsCm(i,2,2) = scrnYCm-MRGN-(dispImgDgnlCm(i)/2); %bottom
+    minMaxImgCntrYLmtsCm(i,2,3) = (scrnYCm/2)-MRGN-(dispImgDgnlCm(i)/2); %top
+    minMaxImgCntrYLmtsCm(i,2,4) = (scrnYCm/2)-MRGN-(dispImgDgnlCm(i)/2); %top
 end
 
 %we'll use FPRINT, so rows in 'A' will end up as columns (and cols in 'A' end up rows)
@@ -152,11 +156,8 @@ for i = 1:trialTot
     
     %temporary list of the image names from which to select the distractor image
     tempImgLst = imgFNm;
- 
-    %temporary list of quadrants the image can be positioned at
-    tempQudrntLst=1:4;
 
-    %temporary list of rotations
+    %temporary list of rotations 
     tempRtns = rotationsLst;
     
     %loop through each event in the trial
@@ -174,16 +175,18 @@ for i = 1:trialTot
         %   DETERMINE THE IMAGE NAME    %
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
    
-        %target image
+        %the image number
+        imgNumIndx = factorTrialOrder(i,2);
+
+        %the quadrant it will appear in
+        qdrntNumImgIndx = factorTrialOrder(i,4);
+
+        %the first image
         if j==1
-            
+
             %9: stim_img_name
             A{9,ACol} = imgFNm{factorTrialOrder(i,2)}(1:end-4);                  
-       
-            %the image number
-            imgNumIndx = factorTrialOrder(i,2);
-            qdrntNumIndx = factorTrialOrder(i,4);
-            
+
             %6: trial_max_time and 10: stim_onset
             if length(STIMON) == 2 %if range, select a random time within the range
                 rndStimOn = (STIMON(2)-STIMON(1))*rand();
@@ -193,110 +196,88 @@ for i = 1:trialTot
                 A{6,ACol} = TRIALDUR-STIMON; %otherwise, use a constant trial duration.
                 A{10,ACol} = STIMON; %otherwise, use a constant onset.
             end
-            
+
             %12: stim_cent_x (proportion of the screen width)
-            A{12,ACol} = (minMaxImgCntrXLmtsCm(imgNumIndx,1,qdrntNumIndx)+...
-                ((minMaxImgCntrXLmtsCm(imgNumIndx,2,qdrntNumIndx)-...
-                minMaxImgCntrXLmtsCm(imgNumIndx,1,qdrntNumIndx))*rand()))/scrnXCm;
-            
+            A{12,ACol} = (minMaxImgCntrXLmtsCm(imgNumIndx,1,qdrntNumImgIndx)+...
+                ((minMaxImgCntrXLmtsCm(imgNumIndx,2,qdrntNumImgIndx)-...
+                minMaxImgCntrXLmtsCm(imgNumIndx,1,qdrntNumImgIndx))*rand()))/scrnXCm;
+
             %13: stim_cent_y (proportion of the screen height)
-            A{13,ACol} = (minMaxImgCntrYLmtsCm(imgNumIndx,1,qdrntNumIndx)+...
-                ((minMaxImgCntrYLmtsCm(imgNumIndx,2,qdrntNumIndx)-...
-                minMaxImgCntrYLmtsCm(imgNumIndx,1,qdrntNumIndx))*rand()))/scrnYCm;
-            
+            A{13,ACol} = (minMaxImgCntrYLmtsCm(imgNumIndx,1,qdrntNumImgIndx)+...
+                ((minMaxImgCntrYLmtsCm(imgNumIndx,2,qdrntNumImgIndx)-...
+                minMaxImgCntrYLmtsCm(imgNumIndx,1,qdrntNumImgIndx))*rand()))/scrnYCm;
+
             %store the target image X and Y-size and rotation
             A{14,ACol} = dispImgSzXCm(imgNumIndx);                %14: stim_size_x (cm)
             A{15,ACol} = dispImgSzYCm(imgNumIndx);                %15: stim_size_y (cm)   
             A{16,ACol} = rotationsLst(factorTrialOrder(i,3));   %16: stim_rotation (degrees)
             A{18,ACol} = uint32(2);                             %18: stim_is_target
+
+        %second image    
+        elseif j==2
             
-            %remove the target image name from the temporary file name list from which we
-            %will draw a random distracter image name
-            tempImgLst(imgNumIndx)=[];
-            rndmImgNmIndx = randi(length(tempImgLst));
-            
-            %remove the target image quadrant position from the temporary list of
-            %quadrants from which we will draw a random quadrant from
-            tempQudrntLst(qdrntNumIndx)=[];
-            rndmQdrntNumIndx = randi(3);
-            
+            %determine the quadrant for the second image
+            switch qdrntNumImgIndx
+                case 1 %bottom left
+                    qdrntNumImgIndx = 2;
+                case 2 %bottom right
+                    qdrntNumImgIndx = 1;
+                case 3 %top right
+                    qdrntNumImgIndx = 4;
+                case 4 %top left
+                    qdrntNumImgIndx = 3;
+            end 
+
+            %'same' shape condition
+            if factorTrialOrder(i,end)==1
+
+                %9: stim_img_name
+                A{9,ACol} = imgFNm{factorTrialOrder(i,2)}(1:end-4);
+
+            %'different' shape condition
+            elseif factorTrialOrder(i,end)==2
+
+                %remove the target image name from the temporary file name list from which we
+                %will draw a random distracter image name
+                tempImgLst(imgNumIndx)=[];
+
+                %update 'imgNumIndx' to reflect a different image
+                imgNumIndx = randi(length(tempImgLst));
+
+                %9: stim_img_name
+                A{9,ACol} = tempImgLst{imgNumIndx}(1:end-4);      
+            end
+
+            %6: trial_max_time and 10: stim_onset
+            if length(STIMON) == 2
+                A{6,ACol} = TRIALDUR-rndStimOn;
+                A{10,ACol} = rndStimOn;
+            else
+                A{6,ACol} = TRIALDUR-STIMON; %otherwise, use a constant trial duration.
+                A{10,ACol} = STIMON; %otherwise, use a constant onset.
+            end
+
+            %12: stim_cent_x (proportion of the screen width)
+            A{12,ACol} = (minMaxImgCntrXLmtsCm(imgNumIndx,1,qdrntNumImgIndx)+...
+                ((minMaxImgCntrXLmtsCm(imgNumIndx,2,qdrntNumImgIndx)-...
+                minMaxImgCntrXLmtsCm(imgNumIndx,1,qdrntNumImgIndx))*rand()))/scrnXCm;
+
+            %13: stim_cent_y (proportion of the screen height)
+            A{13,ACol} = (minMaxImgCntrYLmtsCm(imgNumIndx,1,qdrntNumImgIndx)+...
+                ((minMaxImgCntrYLmtsCm(imgNumIndx,2,qdrntNumImgIndx)-...
+                minMaxImgCntrYLmtsCm(imgNumIndx,1,qdrntNumImgIndx))*rand()))/scrnYCm;
+
+            %store the target image X and Y-size and rotation
+            A{14,ACol} = dispImgSzXCm(imgNumIndx);                %14: stim_size_x (cm)
+            A{15,ACol} = dispImgSzYCm(imgNumIndx);                %15: stim_size_y (cm)
+
             %generate a random index to select a rotation at random from the temporary
             %list of rotations
-            rdnmRtnIndx = randi(length(tempRtns));
-            
-        %distractor image 1
-        elseif j==2
-
-            %select the a random image file from the list of remaining images 
-            A{9,ACol} = tempImgLst{rndmImgNmIndx}(1:end-4);
-            
-            %6: trial_max_time and 10: stim_onset
-            if length(STIMON) == 2 %if range, select a random time within the range
-                A{6,ACol} = TRIALDUR-rndStimOn;
-                A{10,ACol} = rndStimOn;
-            else
-                A{6,ACol} = TRIALDUR-STIMON; %otherwise, use a constant trial duration.
-                A{10,ACol} = STIMON; %otherwise, use a constant onset.
-            end
-                   
-            %12: stim_cent_x (proportion of the screen width)
-            A{12,ACol} = (minMaxImgCntrXLmtsCm(rndmImgNmIndx,1,tempQudrntLst(rndmQdrntNumIndx))+...
-                ((minMaxImgCntrXLmtsCm(rndmImgNmIndx,2,tempQudrntLst(rndmQdrntNumIndx))-...
-                minMaxImgCntrXLmtsCm(rndmImgNmIndx,1,tempQudrntLst(rndmQdrntNumIndx)))*rand()))/scrnXCm;
-            
-            %13: stim_cent_y (proportion of the screen height)
-            A{13,ACol} = (minMaxImgCntrYLmtsCm(rndmImgNmIndx,1,tempQudrntLst(rndmQdrntNumIndx))+...
-                ((minMaxImgCntrYLmtsCm(rndmImgNmIndx,2,tempQudrntLst(rndmQdrntNumIndx))-...
-                minMaxImgCntrYLmtsCm(rndmImgNmIndx,1,tempQudrntLst(rndmQdrntNumIndx)))*rand()))/scrnYCm;
-            
-            %store the computed display size for the distractor image and its rotation
-            A{14,ACol} = dispImgSzXCm(rndmImgNmIndx);             %14: stim_size_x (cm)
-            A{15,ACol} = dispImgSzYCm(rndmImgNmIndx);             %15: stim_size_y (cm)
-            A{16,ACol} = tempRtns(rdnmRtnIndx);    
-            A{18,ACol} = uint32(0);                             %18: stim_is_target
-            
-            %remove the target image quadrant position from the temporary list of
-            %quadrants from which we will draw a random quadrant from
-            tempQudrntLst(rndmQdrntNumIndx)=[];
-            rndmQdrntNumIndx = randi(2);
-            
-            %remove the used rotation from the list of rotations and generate a new index
-            %at random from those that remain
-            tempRtns(rdnmRtnIndx) = [];
-            rdnmRtnIndx = randi(length(tempRtns));
-        
-        %distractor image 2
-        elseif j==3
-            
-            %select the same random image file from the list of remaining images 
-            A{9,ACol} = tempImgLst{rndmImgNmIndx}(1:end-4);
-            
-            %6: trial_max_time, 10: stim_onset, and 11: stim duration
-            if length(STIMON) == 2 %if range, select a random time within the range
-                A{6,ACol} = TRIALDUR-rndStimOn;
-                A{10,ACol} = rndStimOn;
-            else
-                A{6,ACol} = TRIALDUR-STIMON; %otherwise, use a constant trial duration.
-                A{10,ACol} = STIMON; %otherwise, use a constant onset.
-            end
-            
-            %12: stim_cent_x (proportion of the screen width)
-            A{12,ACol} = (minMaxImgCntrXLmtsCm(rndmImgNmIndx,1,tempQudrntLst(rndmQdrntNumIndx))+...
-                ((minMaxImgCntrXLmtsCm(rndmImgNmIndx,2,tempQudrntLst(rndmQdrntNumIndx))-...
-                minMaxImgCntrXLmtsCm(rndmImgNmIndx,1,tempQudrntLst(rndmQdrntNumIndx)))*rand()))/scrnXCm;
-            
-            %13: stim_cent_y (proportion of the screen height)
-            A{13,ACol} = (minMaxImgCntrYLmtsCm(rndmImgNmIndx,1,tempQudrntLst(rndmQdrntNumIndx))+...
-                ((minMaxImgCntrYLmtsCm(rndmImgNmIndx,2,tempQudrntLst(rndmQdrntNumIndx))-...
-                minMaxImgCntrYLmtsCm(rndmImgNmIndx,1,tempQudrntLst(rndmQdrntNumIndx)))*rand()))/scrnYCm;
-            
-            %store the computed image size for the distractors
-            A{14,ACol} = dispImgSzXCm(rndmImgNmIndx);             %14: stim_size_x (cm)
-            A{15,ACol} = dispImgSzYCm(rndmImgNmIndx);             %15: stim_size_y (cm)
-            A{16,ACol} = tempRtns(rdnmRtnIndx);
-            A{18,ACol} = uint32(0);                             %17: stim_is_target
+            rtnIndx = randi(length(tempRtns));
+            A{16,ACol} = rotationsLst(rtnIndx);                 %16: stim_rotation (degrees)
+            A{18,ACol} = uint32(2);                             %18: stim_is_target
         end
-        
+            
         %11: stim duration and %23: mask_duration (seconds)      
         if length(STIMON) == 2 %if range, use the random stim onset.
             
@@ -373,8 +354,8 @@ for i = 1:trialTot
         %otherwise, 'MSKON' is not empty, use that value.    
         else
             A{22,ACol} = MSKON; %otherwise, use a constant onset.
-        end
-
+        end      
+                             
         A{24,ACol} = 0;                                 %24: mask_size
         A{25,ACol} = uint32(MSKCLR);                    %25: mask_color
         A{26,ACol} = 0;                                 %26: mask_rotation (degrees)
