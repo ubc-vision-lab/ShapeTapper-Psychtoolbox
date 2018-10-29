@@ -41,8 +41,13 @@ expEndMsg = 'Experiment Finished\n\n\nPress Any Key To Exit';
 
 timeoutMsg = 'Trial Time Expired.\n\n\nPress Any Key To Continue';
 
+<<<<<<< HEAD
 feedback_message_correct = 'Correct!';
 feedback_message_incorrect = 'Incorrect!';
+=======
+feedback_message_correct = 'Correct!\n\n\nPress Any Key To Continue';
+feedback_message_incorrect = 'Incorrect!\n\n\nPress Any Key To Continue';
+>>>>>>> 647617253e7d03bc0897bff39d7526e89f5ff524
 
 % Acceptable stimulus image formats, must be compatible with imread()
 img_formats = {'.png', '.jpg'};
