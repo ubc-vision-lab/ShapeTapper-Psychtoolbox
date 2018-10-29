@@ -41,6 +41,9 @@ expEndMsg = 'Experiment Finished\n\n\nPress Any Key To Exit';
 
 timeoutMsg = 'Trial Time Expired.\n\n\nPress Any Key To Continue';
 
+feedback_message_correct = 'Correct!\n\n\nPress Any Key To Continue';
+feedback_message_incorrect = 'Incorrect!\n\n\nPress Any Key To Continue';
+
 % Acceptable stimulus image formats, must be compatible with imread()
 img_formats = {'.png', '.jpg'};
 
@@ -875,6 +878,36 @@ for b=1:num_blocks
             Screen('Flip', window);
             DrawFormattedText(window, timeoutMsg, ...
                                 'center', 'center', timeout_text);
+            Screen('Flip', window);
+            [~, keyCode, ~] = KbStrokeWait;
+            if keyCode(ptb.escapeKey)
+                abort_experiment = true;
+            end
+        elseif block_dat.is_practice_block(1) && trial_dat.trial_feedback(end)
+            % if in practice block, with feedback, display feedback
+            % Set text and background color to match first trial
+            feedback_bg = ptb.white;
+            timeout_text = ptb.black;
+            stim_bg_color = cell2mat(trial_dat.background_color(num_stims));
+            if ischar(stim_bg_color)
+                if strcmp(stim_bg_color,'black')
+                    feedback_bg = ptb.black;
+                    feedback_text = ptb.white;
+                end
+            end
+            
+            if correct_choice
+                feedbackMsg = feedback_message_correct;
+            else
+                feedbackMsg = feedback_message_incorrect;
+            end
+            
+            Screen('FillRect', window, feedback_bg);
+
+            % Draw timeout text
+            Screen('Flip', window);
+            DrawFormattedText(window, feedbackMsg, ...
+                                'center', 'center', feedback_text);
             Screen('Flip', window);
             [~, keyCode, ~] = KbStrokeWait;
             if keyCode(ptb.escapeKey)
