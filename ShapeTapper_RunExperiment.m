@@ -41,8 +41,8 @@ expEndMsg = 'Experiment Finished\n\n\nPress Any Key To Exit';
 
 timeoutMsg = 'Trial Time Expired.\n\n\nPress Any Key To Continue';
 
-feedback_message_correct = 'Correct!\n\n\nPress Any Key To Continue';
-feedback_message_incorrect = 'Incorrect!\n\n\nPress Any Key To Continue';
+feedback_message_correct = 'Correct!';
+feedback_message_incorrect = 'Incorrect!';
 
 % Acceptable stimulus image formats, must be compatible with imread()
 img_formats = {'.png', '.jpg'};
@@ -909,10 +909,7 @@ for b=1:num_blocks
             DrawFormattedText(window, feedbackMsg, ...
                                 'center', 'center', feedback_text);
             Screen('Flip', window);
-            [~, keyCode, ~] = KbStrokeWait;
-            if keyCode(ptb.escapeKey)
-                abort_experiment = true;
-            end
+            pause(1);
         end
         
         % Output frame-by-frame timestamp/presentation record
