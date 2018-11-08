@@ -14,7 +14,7 @@
 function ShapeTapper_RunExperiment(config_fname)
 
 % Clear the workspace and the screen
-sca;
+sca;       
 close all;
 clearvars;
 
@@ -258,7 +258,7 @@ data_columns = {'participant',...
                 'rt_target_to_fingerlift',...
                 'rt_fingerlift_to_choice'};
 
-partData = cell2table(cell(tot_num_trials, length(data_columns)),...
+partData = cell2table(cell(2*tot_num_trials, length(data_columns)),...
                       'VariableNames',data_columns);
 
 % Counter for correct row indexing when writing output
