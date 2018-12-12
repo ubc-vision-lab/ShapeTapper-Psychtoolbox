@@ -1,7 +1,7 @@
-function ptb_init_optotrak(opto_initialized, part_dems, out_path)
-instrreset
-opto_initialized = 0; 
-olddir = pwd;
+function optk = ptb_init_optotrak(opto_initialized, part_dems, out_path, max_trial_time)
+% instrreset
+% opto_initialized = 0; 
+% olddir = pwd;
 
 % % prompt for UID
 % % this may as well be a function
@@ -30,18 +30,29 @@ olddir = pwd;
 % end
 % cd(part_dems.id)
 
+% Struct containing Optotrak variables
+optk = struct();
+
+optk.OPTO = '_opto_';
+optk.FNRAWDATA = 'RawNDIDatFiles';
+optk.FNOTCREORG = 'OTCReorganized';
+optk.fixation_threshold = 75;
+optk.MISSINGDATACUTOFFVALUE = -3.6972e28; %an 'anything less than' cutoff value for missing data, 
+
 %create a new file folder to store the NDI raw data if the folder does not exist
 [~, fname, ~] = fileparts(part_dems.config_name);
-NDI_dat_path = [out_path part_dems.id '\' fname];
-NDI_dat_dir = 'FNRAWDATA';
-if exist([NDI_dat_path '\' NDI_dat_dir], 'dir') == 7
+NDI_dat_path = [out_path part_dems.id '/' fname];
+% NDI_dat_dir = 'FNRAWDATA';
+NDI_dat_dir = optk.FNRAWDATA; 
+if exist([NDI_dat_path '/' NDI_dat_dir], 'dir') == 7
 else
     mkdir(NDI_dat_path, NDI_dat_dir);
 end
 
 %create a new file folder to store the reorganized data if the folder does not exist
-NDI_dat_reorg_dir = 'FNOTCREORG';
-if exist([NDI_dat_path '\' NDI_dat_reorg_dir], 'dir') == 7
+% NDI_dat_reorg_dir = 'FNOTCREORG';
+NDI_dat_reorg_dir = optk.FNOTCREORG;
+if exist([NDI_dat_path '/' NDI_dat_reorg_dir], 'dir') == 7
 else
     mkdir(NDI_dat_path, NDI_dat_reorg_dir);
 end
@@ -57,7 +68,10 @@ end
 % realistically the values are probably known beforehand, maybe just set
 % those as defaults so experimenter can "enter" through
 %[nMarkers, smpRt, smpTime, nMarkersPerPort] = OTCParamsHandler;
-nMarkers=4; smpRt=200; smpTime=2; nMarkersPerPort=[nMarkers 0 0 0];
+nMarkers=4; smpRt=200; smpTime=max_trial_time; 
+nMarkersPerPort=[nMarkers 0 0 0];
+optk.nMarkers=4;
+optk.smpRt=200;
 
 %setup the strober specific information (number of markers per
 %port)...NOTE, this function requires a value for a 4th port, but since the
@@ -87,7 +101,7 @@ A = {}; B = {};
 
 %compute additional collection parameters
 ISI = (1/smpRt); %inter-sample-interval (in seconds).
-fTotPerTrial = smpTime/ISI; %the total number of sample frames to collect per trial
+optk.fTotPerTrial = smpTime/ISI; %the total number of sample frames to collect per trial
 
 WaitSecs(1); %wait times recommended in API
 OptotrakActivateMarkers();
@@ -95,5 +109,5 @@ WaitSecs(2); %wait times recommended in API
 
 % optotrack set should be finished before the loop
 
-cd(olddir);
+% cd(olddir);
 end

@@ -11,12 +11,15 @@
 % -Jamie Dunkle, UBC Vision Lab, 2018
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-function ShapeTapper_RunExperiment(config_fname)
+function ShapeTapper_RunExperiment(useEyelink, useOptotrak)
 
 % Clear the workspace and the screen
 sca;       
 close all;
-clearvars;
+% clearvars;
+
+instrreset
+opto_initialized = 0; 
 
 % Add source code path
 addpath('source');
@@ -48,14 +51,14 @@ feedback_message_incorrect = 'Incorrect!';
 img_formats = {'.png', '.jpg'};
 
 % Specify directory containing stimulus images
-stim_dir = 'Image_Files\';
+stim_dir = 'Image_Files/';
 
 % Data output path
 out_path = 'Data/';
 
 % Safety margin added to touchable area around stimulus images 
 % (touchable area is the defined as the smallest circle containing image)
-TOUCH_MARGIN = 1;
+TOUCH_MARGIN_CM = 1;
 
 %----------------------------------------------------------------------
 %                       Experimenter Setup
@@ -63,16 +66,24 @@ TOUCH_MARGIN = 1;
 % Get demographics info
 part_dems = GetDemographics();
 
+[config_fname,config_path] = uigetfile('./Config_Files/*.csv',...
+                              'Select an experiment %%config file');
+config_fname = [config_path config_fname];
+
 % Specify directory containing config files
 switch nargin
    case 0
-       [config_fname,config_path] = uigetfile('./Config_Files/*.csv',...
-                                      'Select an experiment %%config file');
-       config_fname = [config_path config_fname];
-   case 1
-       if isempty(config_fname) || isnan(config_fname)
-           config_fname = 'Config_Files\test_config.csv';
-       end
+       useEyelink = 0;
+       useOptotrak = 0;
+%        [config_fname,config_path] = uigetfile('./Config_Files/*.csv',...
+%                                       'Select an experiment %%config file');
+%        config_fname = [config_path config_fname];
+   case 2
+%        if isempty(config_fname) || isnan(config_fname)
+%            [config_fname,config_path] = uigetfile('./Config_Files/*.csv',...
+%                                       'Select an experiment %%config file');
+%            config_fname = [config_path config_fname];
+%        end
 end
 
 % Extract config file name for demographics file
@@ -144,6 +155,7 @@ if any(all([matches_participant matches_config],2))
             return
     end
 end
+
 %----------------------------------------------------------------------
 %                       PyschToolbox Setup
 %----------------------------------------------------------------------
@@ -163,6 +175,40 @@ waitframes = ptb.waitframes;
 
 % Flip to clear
 Screen('Flip', window);
+
+%----------------------------------------------------------------------
+%                       EyeLink Setup
+%----------------------------------------------------------------------
+if useEyelink
+    % Initialize and calibrate Eyelink
+    el = ptb_init_eyelink(window, out_path, fname, part_dems);
+
+    % Test if Eyelink initialization was successful
+    if ~isempty(el)
+        useEyelink = 1;
+        % Use right eye
+        eye_used = el.RIGHT_EYE;
+    else
+        useEyelink = 0;
+    end
+end 
+
+% Set threshold for bad EyeLink samples in a given trial
+eyelink_bad_count = 0; % count the # of times Eyelink has missed an eye
+eyelink_err_threshold = 100; % if Eyelink misses # in a row, then quit
+
+
+%----------------------------------------------------------------------
+%                       Optotrak Setup
+%----------------------------------------------------------------------
+if useOptotrak
+    max_trial_time = max(config_dat.trial_max_time);
+    warning('off','all')
+    % Initialize Optotrak
+    optk = ptb_init_optotrak(opto_initialized, part_dems, out_path, max_trial_time);
+    warning('on','all')
+end 
+
 
 %----------------------------------------------------------------------
 %                     Load Stimuli Images
@@ -279,6 +325,7 @@ end
 %                       Experimental loop
 %----------------------------------------------------------------------
 
+% Flag to detect experiment end (ESC)
 abort_experiment = false;
 
 % Animation Loop -- here we render and display all blocks & trials
@@ -434,7 +481,7 @@ for b=1:num_blocks
         dotBoundingRect = cell(1,num_stims);
 
         % Declare target mask
-        targetMask = NaN;
+        targetStim = NaN;
         selectedStim = NaN;
         correct_choice = false;
         
@@ -446,7 +493,7 @@ for b=1:num_blocks
             % Store target mask if it matches stim description
             % NOTE: assumption (FOR NOW) is that only 1 stim is the target
             if st.stim_is_target
-                targetMask = s;
+                targetStim = s;
             end
             
             % Fill all frames where this stim is displayed with a 1
@@ -486,7 +533,7 @@ for b=1:num_blocks
             stim_size_y_px = st.stim_size_y * ptb.ppcm;
             stim_centers(s,:) = [stim_cx_px stim_cy_px];
             stim_radius(s) = sqrt(stim_size_x_px^2 + stim_size_y_px^2)/2 + ...
-                                    (TOUCH_MARGIN*ptb.ppcm);
+                                    (TOUCH_MARGIN_CM*ptb.ppcm);
             
             % Make a dotPositionMatrix, dotSize, dotColor array for mask
             if st.mask_fit == 1
@@ -588,12 +635,51 @@ for b=1:num_blocks
         
         % If we have passed fixation requirement, save this state as we
         % will begin reactime time on saccade/finger lift
-        post_fix = 0;
+%         post_fix = 0;
+        post_fix_gaze = 0;
+        post_fix_touch = 0;
         
         % Detect starting touch/gaze and require lift/saccade to begin
         % recording data
         touch_on_start = 0;
         gaze_on_start = 0;
+        
+        % Initialize Optotrak recording
+        if useOptotrak
+            puRealtimeData=0;puSpoolComplete=0;puSpoolStatus=0;pulFramesBuffered=0;
+            
+            %determine the trial number text
+            txtTrial = [num2str(tn, '%03d') '_']; % pad left side with zeros
+            
+            %determine block number text
+            block_txt = [num2str(bn, '%02d') '_']; % pad left side with zeros
+
+%             optotrack_trial_mapping = [optotrack_trial_mapping; [int2str(tn) current_trial_name]];
+            %navigate to the NDI Raw data file
+            NDIFPath = [out_path part_dems.id '/' fname '/' optk.FNRAWDATA '/'];
+
+            %The NDI dat file name for the current trial
+            NDIFName = [part_dems.id optk.OPTO txtTrial block_txt '.dat'];
+
+            if t==1
+                %re-initialize the reorganized data
+                dataReorg = zeros(optk.fTotPerTrial, optk.nMarkers*4);
+            end
+    % -------------- Start the optotrack recording here! -------------------- %
+            %start collecting data, the number of frames to collect was
+            %pre-specified by the function OPTOTRAKSETUPCOLLECTION.
+
+            %initialize the file for spooling
+            OptotrakActivateMarkers();
+            WaitSecs(0.010);
+            DataBufferInitializeFile(0,[NDIFPath NDIFName]);
+            DataBufferStart();
+        end
+
+        % Begin recording EyeLink data
+        if useEyelink
+            Eyelink('StartRecording');
+        end
         
         % -- Display trial stimuli, record responses ----------------------
 
@@ -606,8 +692,9 @@ for b=1:num_blocks
             % Listen for Esc key to abort experiment
             [keyIsDown, ~, keyCode] = KbCheck;
             if keyIsDown && keyCode(ptb.escapeKey)
-                sca;
-                return
+%                 sca;
+                abort_experiment = true;
+                break
             end
             
             % Note when a background color change has occurred in the
@@ -619,9 +706,11 @@ for b=1:num_blocks
             is_touch = any(buttons ~= 0);
 
             % Detect touch/gaze on trial start
-            if frame == 1 && is_touch
-                touch_on_start = true;
-            end
+            if frame == 1
+                if is_touch
+                    touch_on_start = true;
+                end
+            end 
             
             % If trial started with touch, disable is_touch and require
             % a finger lift to register a new touch
@@ -632,7 +721,13 @@ for b=1:num_blocks
                     touch_on_start = false;
                 end
             end
-
+            
+            % If trial started with gaze fixation, require a saccade
+            % to register a new touch
+            if gaze_on_start
+                %ADDGAZE
+            end
+            
             % We clamp the values at the maximum values of the screen
             % in X and Y in case people have two monitors connected.
             tx = min(tx, ptb.screenXpixels);
@@ -643,32 +738,77 @@ for b=1:num_blocks
             trial_touch_samples(2, frame) = ty;
             trial_touch_samples(3, frame) = is_touch;
             
-            % Get current gaze value
-            % TBD
+            gaze_good = false;
             
+            % Get current gaze value
+            if useEyelink
+                % Check recording status, restart EyeLink if error
+                el_error=Eyelink('CheckRecording');
+                if(el_error~=0)
+                    eyelink_bad_count = eyelink_bad_count + 1;
+                    % don't let one bad data point kill ya
+                    if(eyelink_bad_count > eyelink_err_threshold)
+                        disp('Eyelink Error!');
+                        % attempt to restart Eyelink recording
+                        Eyelink('StopRecording');
+                        WaitSecs(0.005);
+                        Eyelink('StartRecording');
+                    end
+                else
+                    eyelink_bad_count = 0; % reset the counter for bad 
+                end
+                
+                % check for presence of a new sample update
+                if Eyelink('NewFloatSampleAvailable') > 0
+                    
+                    % get the sample in the form of an event structure
+                    evt = Eyelink( 'NewestFloatSample');
+                    
+                    % get current gaze position from sample
+                    gx = evt.gx(eye_used+1); % +1 indexing MATLAB array
+                    gy = evt.gy(eye_used+1);
+                    
+                    % do we have valid data and is the pupil visible?
+                    if gx~=el.MISSING_DATA && gy~=el.MISSING_DATA %|| ~(evt.pa(eye_used+1)>0)
+                        gaze_good = true; 
+                    else
+                        gx = NaN;
+                        gy = NaN;
+                    end
+                end
+            end
+                
             % Test if saccade has occurred, start response period 2
-            if post_fix == 1
-                start_saccade = true;
-                post_fix = 0;
+            if post_fix_gaze == 1
+                % If gaze no longer persists on pfidx (previous fixaition)
+                if ~ptb_in_circ(stim_centers(gpfidx,:), [gx gy], stim_radius(gpfidx)*1.5)
+                    start_saccade = true;
+                    post_fix_gaze = 0;
+                end
             end    
                
             % Test if finger lift has occurred, start response period 2
-            if post_fix == 2 && ~is_touch
+            if post_fix_touch == 1 && ~is_touch
                 start_fingerlift = true;
-                post_fix = 0;
+                post_fix_touch = 0;
             end
             
             % Check if fixation appears in current frame
             fixations = find(fixation_schedule(:,frame) ~= 0, 1);
             if ~isempty(fixations)
                 isFixation = true;
-                post_fix = 0;
+%                 post_fix = 0;
                 for f=1:length(fixations)
                     fidx = fixations(f);
                     % Set fixation to active
                     fixation_counter(fidx,3) = true;
                     % Note fixation type in counter
                     fixation_counter(fidx,4) = fixation_schedule(fidx,frame);
+                    if fixation_counter(fidx,4) == 1
+                        post_fix_touch = 0;
+                    elseif fixation_counter(fidx,4) == 2
+                        post_fix_gaze = 0;
+                    end
                 end
             end
             
@@ -677,7 +817,8 @@ for b=1:num_blocks
             if isempty(active_fixations)
             	if isFixation
                     isFixation = false;
-                    post_fix = 1;
+                    post_fix_touch = 1;
+                    post_fix_gaze = 1;
                 end
             else
                 for f=1:length(active_fixations)
@@ -703,16 +844,22 @@ for b=1:num_blocks
                             stim_bounds(fidx,:), ...
                             trial_dat.stim_rotation(fidx));
                     stim_presentations(fidx, frame) = 1;
-                        
-                    % If fixation is gaze type, check for gaze, reset if
-                    % gaze lost
-                    if fixation_counter(fidx,4) == 1
-                    end
                     
                     % If fixation is touch type check for touch, reset if
                     % touch lifted
+                    if fixation_counter(fidx,4) == 1
+                        if ptb_in_circ(stim_centers(fidx,:), [tx ty], stim_radius(fidx)) && is_touch
+%                         if IsInRect(tx, ty, dotBoundingRect{fidx})% && is_touch
+                            fixation_counter(fidx,2) = fixation_counter(fidx,2) + 1;
+                        else
+                            fixation_counter(fidx,2) = 0;
+                        end % touched fixation mask
+                    end
+                        
+                    % If fixation is gaze type, check for gaze, reset if
+                    % gaze lost
                     if fixation_counter(fidx,4) == 2
-                        if IsInRect(tx, ty, dotBoundingRect{fidx})% && is_touch
+                        if ptb_in_circ(stim_centers(fidx,:), [gx gy], stim_radius(fidx)*1.5)
                             fixation_counter(fidx,2) = fixation_counter(fidx,2) + 1;
                         else
                             fixation_counter(fidx,2) = 0;
@@ -723,6 +870,10 @@ for b=1:num_blocks
                     % deactivate fixation
                     if fixation_counter(fidx,1) < fixation_counter(fidx,2)
                         fixation_counter(fidx,3) = false;
+                        % Set fixation ID for gaze persistences
+                        if fixation_counter(fidx,4) == 2
+                            gpfidx = fidx;
+                        end
                     end
                 end
             end
@@ -758,7 +909,7 @@ for b=1:num_blocks
                         stim_displayed(s) = 1;
                         
                         % If stim is target, begin reaction time counter
-                        if s == targetMask && pre_target
+                        if s == targetStim && pre_target
                             start_target_onset = true;
                         end
                     end % image scheduled
@@ -774,17 +925,30 @@ for b=1:num_blocks
                 end % stim loop
                 % Check for collisions
                 for s=1:num_stims
-                    if stim_displayed(s) && trial_dat.stim_is_touchable(s) == 1
-                        if ptb_in_circ(stim_centers(s,:), [tx ty], stim_radius(s)) && is_touch
-                            hasSelected = true;
-                            selectedStim = s;
-                            if bad_trials(t)
-                                bad_trials(t) = false;
-                            end
-                        end% touched stim
+                    if stim_displayed(s)
+                        % If stim is touchable, detect if touched
+                        if trial_dat.stim_is_touchable(s) == 1
+                            if ptb_in_circ(stim_centers(s,:), [tx ty], stim_radius(s)) && is_touch
+                                hasSelected = true;
+                                selectedStim = s;
+                                if bad_trials(t)
+                                    bad_trials(t) = false;
+                                end
+                            end% touched stim
+                        end
+                        % If stim is gaze target, detect gaze
+                        if trial_dat.stim_is_touchable(s) == 2
+                            if ptb_in_circ(stim_centers(s,:), [gx gy], stim_radius(s)) && ~gaze_on_start
+                                hasSelected = true;
+                                selectedStim = s;
+                                if bad_trials(t)
+                                    bad_trials(t) = false;
+                                end
+                            end% touched stim
+                        end
                     end % image displayed & touchable
                 end
-                % Check for any non-stim touches, add trial to lsit of bad
+                % Check for any non-stim touches, add trial to list of bad
                 % trials to repeat at end of block
                 if any(stim_displayed) && ~hasSelected && is_touch
                     hasSelected = true;
@@ -793,6 +957,16 @@ for b=1:num_blocks
                 end
             end % if fixation pause
                 
+            if gaze_good
+                gazeRect=[gx-7 gy-7 gx+8 gy+8];         
+                gx_str = num2str(gx);
+                gy_str = num2str(gy);     
+                mos_pos = strcat(gx_str, ',', gy_str);         
+                Screen('FrameOval', window, ptb.white,gazeRect,6,6);       
+                Screen('DrawText', window, mos_pos, gx+50, gy+50);
+            end
+            
+            
             % Flip to the screen
             [vbl, sot, flip, miss, ~] = Screen('Flip', window, vbl + (waitframes - 0.5) * ifi);
                         
@@ -825,14 +999,18 @@ for b=1:num_blocks
             
             % If a fixation has occured, record finger lift or saccade
             % reaction time
-            if post_fix
+            if post_fix_gaze
                 % If saccade occurs, note time & start rt counter
                 if start_saccade
                     rt_start_saccade = frame;
                     rt_target_to_saccade = frame - rt_start_target_onset;
                     start_saccade = false;
                 end
-
+            end
+            
+            % If a fixation has occured, record finger lift or saccade
+            % reaction time
+            if post_fix_touch
                 % If finger lift occurs, note time & start rt counter
                 if start_fingerlift
                     rt_start_fingerlift = frame;
@@ -843,7 +1021,7 @@ for b=1:num_blocks
             
             % End trial if selection has been made
             if hasSelected == true
-                correct_choice = (selectedStim == targetMask);
+                correct_choice = (selectedStim == targetStim);
                 break
             end
                 
@@ -856,6 +1034,70 @@ for b=1:num_blocks
             frame = frame + next_frame;
             
         end % frame loop
+        
+        % Stop recording EyeLink data
+        if useEyelink
+            Eyelink('StopRecording');
+        end
+        
+        if useOptotrak
+            DataBufferStop();
+            puSpoolComplete = 0;
+            fprintf('spooling data\n');
+            %transfer data from the optotrak to the computer
+            while (puSpoolComplete == 0)
+                % call C library function here. See PDF
+                [puRealtimeData,puSpoolComplete,puSpoolStatus,pulFramesBuffered]=DataBufferWriteData(puRealtimeData,puSpoolComplete,puSpoolStatus,pulFramesBuffered);
+                WaitSecs(.1);
+                if puSpoolStatus ~= 0
+                    disp('Spooling Error');
+                    break;
+                end
+            end
+            disp('spooling complete. deactivating markers');
+            
+            %Deactivate the Markers
+            OptotrakDeActivateMarkers();
+            
+            disp(['attempting to read file: ' deblank([NDIFPath NDIFName])]);
+            %open the .dat file stored by Optotrak
+            [fid, ~] = fopen(deblank([NDIFPath NDIFName]),'r+','l'); % little endian byte ordering
+
+            %Read the header portion of the file
+            [~,items,subitems,numframes] = read_nd_c_file_header(fid);
+
+            %Read the data portion of the file
+            rawData = read_nd_c_file_data(fid, items, subitems, numframes);
+            fclose(fid);
+            
+            disp('converting data');
+            %Convert the data to a format OTCTextWrite accepts
+            for i = 1:optk.nMarkers
+                %append the marker data to dataReorg and delete the 
+                dataReorg(1:size(rawData,3),((i+1)*3)-2:(i+1)*3) = transpose(squeeze(rawData(i,:,:)));
+            end
+    
+            %Convert missing data to NaNs
+            dataReorg(dataReorg < optk.MISSINGDATACUTOFFVALUE) = NaN;
+        
+            %add the data collection information to the data
+            dataReorg(:,1) = tn;
+            dataReorg(:,2) = optk.smpRt;
+        
+            %navigate to the 'OTCReorganized' file folder
+            NDIDatPath = [out_path part_dems.id '/' fname '/' optk.FNOTCREORG '/'];
+            NDIDatFile = [part_dems.id optk.OPTO txtTrial block_txt '.txt'];
+            %ALWAYS STORE A RAW DATA SET
+            disp(['Saving file: ' NDIDatFile ' ...'])
+            fid = fopen([NDIDatPath NDIDatFile], 'w');
+            %fprintf(fid, hdr);
+            fclose(fid);
+            dlmwrite([NDIDatPath NDIDatFile],...
+                        dataReorg,'-append','delimiter',...
+                        '\t','newline','pc','precision',12);
+            disp('Success!')
+        end
+        
         
         % Save total trial time
         trial_frames_elapsed = min(frame, trial_frames);
@@ -939,15 +1181,15 @@ for b=1:num_blocks
         partData.BadTrial{row_ct} = 0; % TBD
         
         % Extract target stimulus info from trial stim table if possible
-        if ~isnan(targetMask)
-            tr = trial_dat(targetMask,:);
+        if ~isnan(targetStim)
+            tr = trial_dat(targetStim,:);
             partData.target_image_name{row_ct} = cell2mat(tr.stim_img_name);
             partData.target_center_x{row_ct} = tr.stim_cent_x*ptb.screenXpixels;
             partData.target_center_y{row_ct} = tr.stim_cent_y*ptb.screenYpixels;
             partData.target_size_x{row_ct} = tr.stim_size_x*ptb.ppcm;
             partData.target_size_y{row_ct} = tr.stim_size_y*ptb.ppcm;
             partData.target_rotation{row_ct} = tr.stim_rotation;
-            partData.target_image_num{row_ct} = targetMask;
+            partData.target_image_num{row_ct} = targetStim;
         end
         
         % Extract chosen stimulus info from trial stim table if possible
@@ -1068,6 +1310,8 @@ for b=1:num_blocks
                 return;
             end
         end % bn < num_blocks
+    else
+        break
     end % abort_experiment
     
 end % block loop
@@ -1093,4 +1337,11 @@ DrawFormattedText(window, expEndMsg, 'center', 'center', eoe_text);
 Screen('Flip', window);
 KbStrokeWait;
 ShowCursor('arrow', window);
+
+% End EyeLink recording and save data file
+if useEyelink
+    edf_file_out = [part_out_path fname '_' el.edfFile];
+    ptb_end_eyelink(el.edfFile, edf_file_out);
+end
+    
 sca;

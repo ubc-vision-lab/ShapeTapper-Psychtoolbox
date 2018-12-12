@@ -38,10 +38,10 @@ screens = Screen('Screens');
 % have two screens attached to our monitor we will draw to the external
 % screen. When only one screen is attached to the monitor we will draw to
 % this. For help see: help max
-ptb.screenNumber = max(screens);
+ptb.screenNumber = 0; %max(screens);
 
 % Hide cursor for touchscreen display (will use ShowCursor on program exit)
-HideCursor(ptb.screenNumber);
+% HideCursor(ptb.screenNumber);
 
 % Define black and white (white will be 1 and black 0). This is because
 % luminace values are (in general) defined between 0 and 1. For help see:
