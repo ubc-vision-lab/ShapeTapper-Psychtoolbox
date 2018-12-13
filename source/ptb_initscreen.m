@@ -1,4 +1,4 @@
-function [ ptb ] = ptb_initscreen( bg_color )
+function [ ptb ] = ptb_initscreen( background_color, text_color )
 %ptb_initscreen Inits Psychtoolbox and returns struct with window vars
 
 %----------------------------------------------------------------------
@@ -38,10 +38,10 @@ screens = Screen('Screens');
 % have two screens attached to our monitor we will draw to the external
 % screen. When only one screen is attached to the monitor we will draw to
 % this. For help see: help max
-ptb.screenNumber = 0; %max(screens);
+ptb.screenNumber = 1; %max(screens);
 
 % Hide cursor for touchscreen display (will use ShowCursor on program exit)
-% HideCursor(ptb.screenNumber);
+HideCursor(ptb.screenNumber);
 
 % Define black and white (white will be 1 and black 0). This is because
 % luminace values are (in general) defined between 0 and 1. For help see:
@@ -49,26 +49,28 @@ ptb.screenNumber = 0; %max(screens);
 ptb.white = WhiteIndex(ptb.screenNumber);
 ptb.black = BlackIndex(ptb.screenNumber);
 
-% Test if bg_color has been defined as 'black' or 'white', or if an rgb
-% array has been specified. If not, then default to white.
-if ischar(bg_color{:})
-	if strcmp(bg_color,'white')
-        ptb.bg = ptb.white;
-    elseif strcmp(bg_color,'black')
-        ptb.bg = ptb.black;
-    else
-        ptb.bg = ptb.white;
-    end
-elseif isvector(bg_color) && length(bg_color) == 3
-    ptb.bg = bg_color;
+% Test if color has been defined as an rgb array. 
+% If not, then default to black bg, white text.
+bg_color = cellfun(@str2double, strsplit(background_color{1,1}));
+if size(bg_color,2) == 3
+    ptb.bg_color = bg_color;
 else
-    ptb.bg = ptb.white;
+    disp('Error reading background color! Default to black');
+    ptb.bg_color = [0,0,0];
+end
+
+txt_color = cellfun(@str2double, strsplit(text_color{1,1}));
+if size(txt_color,2) == 3
+    ptb.text_color = txt_color;
+else 
+    disp('Error reading text color! Default to white');
+    ptb.bg_color = [1,1,1];
 end
 
 % Open an on screen window and color the background For help see: Screen
 % OpenWindow?
 [ptb.window, ptb.windowRect] = PsychImaging('OpenWindow', ...
-                                              ptb.screenNumber, ptb.bg);
+                                            ptb.screenNumber, ptb.bg_color);
 
 % Retreive the maximum priority number and set max priority
 topPriorityLevel = MaxPriority(ptb.window);

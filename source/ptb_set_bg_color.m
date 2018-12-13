@@ -1,4 +1,4 @@
-function [ptb, bg_color_change, text_color_change] = ptb_set_bg_color(stim_bg_color, stim_text_color, ptb)
+function [ptb, bg_color_change] = ptb_set_bg_color(stim_bg_color, stim_text_color, ptb)
 %PTB_SET_BG_COLOR Changes background and text display color, if necessary
 %
 %   Input: ptb = psychtoolbox struct returned by ptb_initscreen.m
@@ -9,18 +9,17 @@ function [ptb, bg_color_change, text_color_change] = ptb_set_bg_color(stim_bg_co
 %           bg_color_change = bool, 0 if no change occured, 1 if change
 
 
-% Initialize output vars
+% Initialize output var
 bg_color_change = false;
-text_color_change = false;
 
 % Convert stimulus row colors from RGB strings to vectors
 new_bg_color = cellfun(@str2double, strsplit(stim_bg_color));
 new_text_color = cellfun(@str2double, strsplit(stim_text_color));
 
 % Scale RGB values (assumed [0-1]) to PTB screen black and white range
-scale = ptb.white - ptb.black;
-new_bg_color = (new_bg_color .* ptb.white) + ptb.black;
-new_text_color =  (new_text_color .* ptb.white) + ptb.black;
+bw_scale = ptb.white - ptb.black;
+new_bg_color = (new_bg_color .* bw_scale) + ptb.black;
+new_text_color =  (new_text_color .* bw_scale) + ptb.black;
 
 % If a change in background color is detected, then redraw background
 if ptb.bg_color ~= new_bg_color
@@ -32,7 +31,7 @@ end
 % If a change in text color is detected, then save text color for output
 if ptb.text_color ~= new_text_color
     ptb.text_color = new_text_color;
-    text_color_change = true;
+    bg_color_change = true;
 end
 
 end

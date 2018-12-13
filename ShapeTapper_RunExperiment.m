@@ -47,6 +47,8 @@ timeoutMsg = 'Trial Time Expired.\n\n\nPress Any Key To Continue';
 feedback_message_correct = 'Correct!';
 feedback_message_incorrect = 'Incorrect!';
 
+kbrespMsg = 'Letter?';
+
 % Acceptable stimulus image formats, must be compatible with imread()
 img_formats = {'.png', '.jpg'};
 
@@ -159,12 +161,13 @@ end
 %----------------------------------------------------------------------
 %                       PyschToolbox Setup
 %----------------------------------------------------------------------
-% Get background color from config file
+% Get background and text color from config file
 bg_color = config_dat.background_color(1);
+text_color = config_dat.text_color(1);
 
 % Run function to init PsychToolbox screen and store relevant vars for
 % later rendering and timing
-ptb = ptb_initscreen( bg_color );
+ptb = ptb_initscreen( bg_color, text_color );
 
 % Get window handle for PTB rendering
 window = ptb.window;
@@ -226,6 +229,14 @@ img_names = unique(img_names);
 % and store handles in a Map object to render during trials
 stim_textures = ptb_loadtextures(stim_dir, img_names, img_formats, ptb);
 
+% Retreive names of feedback images (ones not marked 'msg')
+fb_img_idx = find( ~(strcmp(config_dat.trial_feedback_type, 'msg')) );
+fb_img_names = unique(config_dat.trial_feedback_type(fb_img_idx));
+
+% Extract unique strings for a list of imgs
+fb_img_names = unique(fb_img_names);
+
+fb_textures = ptb_loadtextures(stim_dir, fb_img_names, img_formats, ptb);
 
 %----------------------------------------------------------------------
 %                     Make an output data table
@@ -297,6 +308,7 @@ data_columns = {'participant',...
                 'touch_point_y',...
                 'touch_point_relative_x',...
                 'touch_point_relative_y',...
+                'keyboard_response',...
                 'trial_time_elapsed',...
                 'rt_target_to_choice',...
                 'rt_target_to_saccade',...
@@ -338,19 +350,10 @@ for b=1:num_blocks
     % for a key-press
     if b == 1
         % Set text and background color to match first trial
-        welcome_bg = ptb.white;
-        welcome_text = ptb.black;
-        stim_bg_color = cell2mat(config_dat.background_color(1));
-        if ischar(stim_bg_color)
-            if strcmp(stim_bg_color,'black')
-                welcome_bg = ptb.black;
-                welcome_text = ptb.white;
-            end
-        end
-        Screen('FillRect', window, welcome_bg);
+        Screen('FillRect', window, ptb.bg_color);
         
         % Draw welcome text
-        DrawFormattedText(window,welcomeMsg,'center','center', welcome_text);
+        DrawFormattedText(window,welcomeMsg,'center','center', ptb.text_color);
         Screen('Flip', window);
 
         % Listen for Esc key to abort experiment
@@ -375,20 +378,16 @@ for b=1:num_blocks
     
     % Display practice block message, if applicable
     if block_dat.is_practice_block(1)
-        block_bg = ptb.white;
-        block_text = ptb.black;
-        stim_bg_color = cell2mat(block_dat.background_color(1));
-        if ischar(stim_bg_color)
-            if strcmp(stim_bg_color,'black')
-                block_bg = ptb.black;
-                block_text = ptb.white;
-            end
+        % Set text and background color to match first trial
+        if ~bg_color_change
+        	[ptb, bg_color_change] = ptb_set_bg_color(cell2mat(block_dat.background_color(1)), cell2mat(block_dat.text_color(1)), ptb);
         end
-        Screen('FillRect', window, block_bg);
+                    
+        Screen('FillRect', window, ptb.bg_color);
 
         % Draw practice block or generic block end message
         DrawFormattedText(window, practiceStartMsg, ...
-                        'center', 'center', block_text);
+                            'center', 'center', ptb.text_color);
                     
         Screen('Flip', window);
         
@@ -624,6 +623,9 @@ for b=1:num_blocks
         % Cue to determine if a fixation pause is happening
         isFixation = false;
         
+        % Keyboard response
+        kb_resp = 'None';
+        
         % Frame counters: one for total elapsed time (incl. fixation pause)
         % and one for stimuli schedule
         frame = 1;
@@ -824,19 +826,11 @@ for b=1:num_blocks
                 for f=1:length(active_fixations)
                     fidx = active_fixations(f);
                     
-                    % Detect if backgroudnd color changed
+                    % Detect if background color changed
                     if ~bg_color_change
-                        stim_bg = ptb.white;
-                        stim_bg_color = cell2mat(trial_dat.background_color(fidx));
-                        if ischar(stim_bg_color)
-                            if strcmp(stim_bg_color,'black')
-                                stim_bg = ptb.black;
-                            end
-                        end
-                        Screen('FillRect', window, stim_bg);
-                        bg_color_change = true;
+                        [ptb, bg_color_change] = ptb_set_bg_color(cell2mat(trial_dat.background_color(fidx)), cell2mat(trial_dat.text_color(fidx)), ptb);
                     end
-                    
+
                     % Render fixation image
                     fix_name = char(trial_dat.stim_img_name(fidx));
                     Screen('DrawTextures', window,...
@@ -888,15 +882,7 @@ for b=1:num_blocks
 
                         % Detect if backgroudnd color changed
                         if ~bg_color_change
-                            stim_bg = ptb.white;
-                            stim_bg_color = cell2mat(trial_dat.background_color(s));
-                            if ischar(stim_bg_color)
-                                if strcmp(stim_bg_color,'black')
-                                    stim_bg = ptb.black;
-                                end
-                            end
-                            Screen('FillRect', window, stim_bg);
-                            bg_color_change = true;
+                            [ptb, bg_color_change] = ptb_set_bg_color(cell2mat(trial_dat.background_color(s)), cell2mat(trial_dat.text_color(s)), ptb);
                         end
 
                         % Display stim
@@ -926,25 +912,46 @@ for b=1:num_blocks
                 % Check for collisions
                 for s=1:num_stims
                     if stim_displayed(s)
+                        stim_is_touched = false;
+                        
                         % If stim is touchable, detect if touched
                         if trial_dat.stim_is_touchable(s) == 1
                             if ptb_in_circ(stim_centers(s,:), [tx ty], stim_radius(s)) && is_touch
-                                hasSelected = true;
-                                selectedStim = s;
-                                if bad_trials(t)
-                                    bad_trials(t) = false;
-                                end
+                                stim_is_touched = true;
                             end% touched stim
                         end
+                        
                         % If stim is gaze target, detect gaze
                         if trial_dat.stim_is_touchable(s) == 2
                             if ptb_in_circ(stim_centers(s,:), [gx gy], stim_radius(s)) && ~gaze_on_start
-                                hasSelected = true;
-                                selectedStim = s;
-                                if bad_trials(t)
-                                    bad_trials(t) = false;
-                                end
+                                stim_is_touched = true;
                             end% touched stim
+                        end
+                        
+                        % If stim is touch or gaze target, detect either
+                        if trial_dat.stim_is_touchable(s) == 3
+                            if ptb_in_circ(stim_centers(s,:), [tx ty], stim_radius(s)) && is_touch
+                                stim_is_touched = true;
+                            end% touched stim
+                            if ptb_in_circ(stim_centers(s,:), [gx gy], stim_radius(s)) && ~gaze_on_start
+                                stim_is_touched = true;
+                            end% touched stim
+                        end
+                        
+                        % If stim is touch and gaze target, detect both
+                        if trial_dat.stim_is_touchable(s) == 4
+                            if (ptb_in_circ(stim_centers(s,:), [gx gy], stim_radius(s)) && ~gaze_on_start ...
+                                    && ptb_in_circ(stim_centers(s,:), [tx ty], stim_radius(s)) && is_touch)
+                                stim_is_touched = true;
+                            end% touched stim
+                        end
+                        
+                        if stim_is_touched
+                            hasSelected = true;
+                            selectedStim = s;
+                            if bad_trials(t)
+                                bad_trials(t) = false;
+                            end
                         end
                     end % image displayed & touchable
                 end
@@ -1104,54 +1111,76 @@ for b=1:num_blocks
         
         % If trial timed out, display time out message
         if trial_frames_elapsed >= trial_frames
-        	% Set text and background color to match first trial
-            timeout_bg = ptb.white;
-            timeout_text = ptb.black;
-            stim_bg_color = cell2mat(trial_dat.background_color(num_stims));
-            if ischar(stim_bg_color)
-                if strcmp(stim_bg_color,'black')
-                    timeout_bg = ptb.black;
-                    timeout_text = ptb.white;
+            if trial_dat.trial_timeout_msg(num_stims)
+                % Set text and background color to match first trial
+                if ~bg_color_change
+                    [ptb, bg_color_change] = ptb_set_bg_color(cell2mat(trial_dat.background_color(num_stims)), cell2mat(trial_dat.text_color(num_stims)), ptb);
+                end
+
+                % Draw timeout text
+                Screen('Flip', window);
+                DrawFormattedText(window, timeoutMsg, ...
+                                    'center', 'center', ptb.text_color);
+                Screen('Flip', window);
+                [~, keyCode, ~] = KbStrokeWait;
+                if keyCode(ptb.escapeKey)
+                    abort_experiment = true;
                 end
             end
-            Screen('FillRect', window, timeout_bg);
-
-            % Draw timeout text
-            Screen('Flip', window);
-            DrawFormattedText(window, timeoutMsg, ...
-                                'center', 'center', timeout_text);
-            Screen('Flip', window);
-            [~, keyCode, ~] = KbStrokeWait;
-            if keyCode(ptb.escapeKey)
-                abort_experiment = true;
-            end
-        elseif block_dat.is_practice_block(1) && trial_dat.trial_feedback(end)
-            % if in practice block, with feedback, display feedback
-            % Set text and background color to match first trial
-            feedback_bg = ptb.white;
-            timeout_text = ptb.black;
-            stim_bg_color = cell2mat(trial_dat.background_color(num_stims));
-            if ischar(stim_bg_color)
-                if strcmp(stim_bg_color,'black')
-                    feedback_bg = ptb.black;
-                    feedback_text = ptb.white;
+        elseif ~abort_experiment
+            % If trial keyboard response is on, prompt for keypress
+            if trial_dat.trial_kb_resp(num_stims)
+                % Set text and background color to match first trial
+                if ~bg_color_change
+                    [ptb, bg_color_change] = ptb_set_bg_color(cell2mat(trial_dat.background_color(num_stims)), cell2mat(trial_dat.text_color(num_stims)), ptb);
                 end
-            end
-            
-            if correct_choice
-                feedbackMsg = feedback_message_correct;
-            else
-                feedbackMsg = feedback_message_incorrect;
-            end
-            
-            Screen('FillRect', window, feedback_bg);
 
-            % Draw timeout text
-            Screen('Flip', window);
-            DrawFormattedText(window, feedbackMsg, ...
-                                'center', 'center', feedback_text);
-            Screen('Flip', window);
-            pause(1);
+                % Draw timeout text
+                Screen('Flip', window);
+                DrawFormattedText(window, kbrespMsg, ...
+                                    'center', 'center', ptb.text_color);
+                Screen('Flip', window);
+                [~, keyCode, ~] = KbStrokeWait;
+                if keyCode(ptb.escapeKey)
+                    abort_experiment = true;
+                    break
+                end
+                kb_resp = KbName(keyCode);
+            end
+            
+            % Display feedback
+            if trial_dat.trial_feedback(end)
+                % Set text and background color to match first trial
+                if ~bg_color_change
+                    [ptb, bg_color_change] = ptb_set_bg_color(cell2mat(trial_dat.background_color(num_stims)), cell2mat(trial_dat.text_color(num_stims)), ptb);
+                end
+
+                % Get feedback message image handle or "msg"
+                fb_fname = char(trial_dat.trial_feedback_type(num_stims));
+
+                % Clear screen
+                Screen('Flip', window);
+                
+                % Render feedback image or text
+                if bad_trials(t) || ~(strcmp(kb_resp, trial_dat.correct_kb_resp(num_stims)))
+                    if strcmp(fb_fname, 'msg')
+                        feedbackMsg = feedback_message_incorrect;
+                        Screen('Flip', window);
+                        DrawFormattedText(window, feedbackMsg, 'center', 'center', ptb.text_color);
+                    else
+                        Screen('DrawTextures', window, fb_textures(fb_fname), [], [], 0);
+                    end
+                else
+                    if strcmp(fb_fname, 'msg')
+                        feedbackMsg = feedback_message_correct;
+                        Screen('Flip', window);
+                        DrawFormattedText(window, feedbackMsg, 'center', 'center', ptb.text_color);
+                    end
+                end
+                
+                Screen('Flip', window);
+                pause(1);
+            end
         end
         
         % Output frame-by-frame timestamp/presentation record
@@ -1237,6 +1266,7 @@ for b=1:num_blocks
         partData.choice_correct{row_ct} = correct_choice;
         partData.touch_point_x{row_ct} = tx;
         partData.touch_point_y{row_ct} = ty;
+        partData.keyboard_response{row_ct} = kb_resp;
         partData.trial_time_elapsed{row_ct} = (trial_frames_elapsed+1) * ifi;
         partData.rt_target_to_choice{row_ct} = rt_target_to_choice * ifi;
         partData.rt_target_to_saccade{row_ct} = rt_target_to_saccade * ifi;
@@ -1283,25 +1313,17 @@ for b=1:num_blocks
         if bn < num_blocks
             % End of block screen. 
             % Set text and background color to match first trial
-            block_bg = ptb.white;
-            block_text = ptb.black;
-            stim_bg_color = cell2mat(trial_dat.background_color(num_stims));
-            if ischar(stim_bg_color)
-                if strcmp(stim_bg_color,'black')
-                    block_bg = ptb.black;
-                    block_text = ptb.white;
-                end
+            if ~bg_color_change
+            	[ptb, bg_color_change] = ptb_set_bg_color(cell2mat(trial_dat.background_color(num_stims)), cell2mat(trial_dat.text_color(num_stims)), ptb);
             end
-            Screen('FillRect', window, block_bg);
 
             % Draw practice block or generic block end message
             if trial_dat.is_practice_block(1)
             	DrawFormattedText(window, practiceEndMsg, ...
-                                'center', 'center', block_text);
+                                'center', 'center', ptb.text_color);
             else
-                % Draw block text
                 DrawFormattedText(window, blockEndMsg, ...
-                                'center', 'center', block_text);
+                                'center', 'center', ptb.text_color);
             end
             Screen('Flip', window);
             [~, keyCode, ~] = KbStrokeWait;
@@ -1322,18 +1344,12 @@ Screen('Flip', window);
 % End of experiment screen. We clear the screen once they have made their
 % response
 % Set text and background color to match first trial
-eoe_bg = ptb.white;
-eoe_text = ptb.black;
-stim_bg_color = cell2mat(trial_dat.background_color(num_stims));
-if ischar(stim_bg_color)
-    if strcmp(stim_bg_color,'black')
-        eoe_bg = ptb.black;
-        eoe_text = ptb.white;
-    end
+if ~bg_color_change
+    ptb = ptb_set_bg_color(cell2mat(trial_dat.background_color(num_stims)), cell2mat(trial_dat.text_color(num_stims)), ptb);
 end
-Screen('FillRect', window, eoe_bg);
+
 % Draw End of Experiment text
-DrawFormattedText(window, expEndMsg, 'center', 'center', eoe_text);
+DrawFormattedText(window, expEndMsg, 'center', 'center', ptb.text_color);
 Screen('Flip', window);
 KbStrokeWait;
 ShowCursor('arrow', window);
