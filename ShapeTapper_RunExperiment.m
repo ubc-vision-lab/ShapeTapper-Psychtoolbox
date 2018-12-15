@@ -909,11 +909,11 @@ for b=1:num_blocks
                         stim_presentations(s, frame) = stim_presentations(s, frame) + 2;
                     end % mask scheduled
                 end % stim loop
+                
                 % Check for collisions
+                stim_is_touched = false;
                 for s=1:num_stims
-                    if stim_displayed(s)
-                        stim_is_touched = false;
-                        
+                    if stim_displayed(s) && ~stim_is_touched
                         % If stim is touchable, detect if touched
                         if trial_dat.stim_is_touchable(s) == 1
                             if ptb_in_circ(stim_centers(s,:), [tx ty], stim_radius(s)) && is_touch
