@@ -230,8 +230,8 @@ img_names = unique(img_names);
 stim_textures = ptb_loadtextures(stim_dir, img_names, img_formats, ptb);
 
 % Retreive names of feedback images (ones not marked 'msg')
-fb_img_idx = find( ~(strcmp(config_dat.trial_feedback_type, 'msg')) );
-fb_img_names = unique(config_dat.trial_feedback_type(fb_img_idx));
+fb_img_idx = find( config_dat.trial_feedback_type == 1 );
+fb_img_names = unique(config_dat.trial_feedback_image(fb_img_idx));
 
 % Extract unique strings for a list of imgs
 fb_img_names = unique(fb_img_names);
@@ -1149,29 +1149,27 @@ for b=1:num_blocks
             end
             
             % Display feedback
-            if trial_dat.trial_feedback(end)
+            if trial_dat.trial_feedback_type(end)
                 % Set text and background color to match first trial
                 if ~bg_color_change
                     [ptb, bg_color_change] = ptb_set_bg_color(cell2mat(trial_dat.background_color(num_stims)), cell2mat(trial_dat.text_color(num_stims)), ptb);
                 end
-
-                % Get feedback message image handle or "msg"
-                fb_fname = char(trial_dat.trial_feedback_type(num_stims));
 
                 % Clear screen
                 Screen('Flip', window);
                 
                 % Render feedback image or text
                 if bad_trials(t) || ~(strcmp(kb_resp, trial_dat.correct_kb_resp(num_stims)))
-                    if strcmp(fb_fname, 'msg')
+                    if trial_dat.trial_feedback_type == 2
                         feedbackMsg = feedback_message_incorrect;
                         Screen('Flip', window);
                         DrawFormattedText(window, feedbackMsg, 'center', 'center', ptb.text_color);
-                    else
+                    elseif trial_dat.trial_feedback_type == 1
+                        fb_fname = char(trial_dat.trial_feedback_image(num_stims));
                         Screen('DrawTextures', window, fb_textures(fb_fname), [], [], 0);
                     end
                 else
-                    if strcmp(fb_fname, 'msg')
+                    if trial_dat.trial_feedback_type == 2
                         feedbackMsg = feedback_message_correct;
                         Screen('Flip', window);
                         DrawFormattedText(window, feedbackMsg, 'center', 'center', ptb.text_color);
