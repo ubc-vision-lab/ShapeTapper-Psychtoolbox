@@ -229,9 +229,9 @@ img_names = unique(img_names);
 % and store handles in a Map object to render during trials
 stim_textures = ptb_loadtextures(stim_dir, img_names, img_formats, ptb);
 
-% Retreive names of feedback images (ones not marked 'msg')
-fb_img_idx = find( config_dat.trial_feedback_type == 1 );
-fb_img_names = unique(config_dat.trial_feedback_image(fb_img_idx));
+% Retreive names of feedback images (ones not marked 'None')
+fb_img_idx =  ~strcmp(config_dat.trial_feedback_img,'None') ;
+fb_img_names = unique(config_dat.trial_feedback_img(fb_img_idx));
 
 % Extract unique strings for a list of imgs
 fb_img_names = unique(fb_img_names);
@@ -1165,7 +1165,7 @@ for b=1:num_blocks
                         Screen('Flip', window);
                         DrawFormattedText(window, feedbackMsg, 'center', 'center', ptb.text_color);
                     elseif trial_dat.trial_feedback_type == 1
-                        fb_fname = char(trial_dat.trial_feedback_image(num_stims));
+                        fb_fname = char(trial_dat.trial_feedback_img(num_stims));
                         Screen('DrawTextures', window, fb_textures(fb_fname), [], [], 0);
                     end
                 else
