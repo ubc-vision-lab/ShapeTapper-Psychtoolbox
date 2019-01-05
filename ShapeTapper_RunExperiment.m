@@ -495,18 +495,59 @@ for b=1:num_blocks
                 targetStim = s;
             end
             
-            % Fill all frames where this stim is displayed with a 1
-            stim_img_on = ceil(st.stim_onset / ifi) + 1;
-            stim_img_off = ceil((st.stim_onset+st.stim_duration) / ifi) + 1;
-            if stim_img_on ~= stim_img_off
-                stim_schedule(s, stim_img_on:stim_img_off) = 1;
-            end
+            % Check if stimulus is activated by user action (finger lift,
+            % saccade) or scheduled event, then store timing info in sched
+            if st.stim_onset < 0
+                % If stim onset time is -1, it is activated by finger lift
+                % if stim onset time is -2, it is activated by saccade
+                
+                % If stim is activated & deactivated by same action => null
+                if st.stim_onset == st.stim_duration
+                    stim_schedule(s, :) = 0;
+                % If stim is finger lift activated and saccade deactivated
+                elseif st.stim_onset == -1 && st.stim_duration == -2
+                    stim_schedule(s, :) = -12;
+                % If stim is saccade activated and finger lift deactivated
+                elseif st.stim_onset == -2 && st.stim_duration == -1
+                    stim_schedule(s, :) = -21;
+                % If -3, stim stays on until end of trial after activated
+                elseif st.stim_duration == -3
+                    stim_schedule(s, :) = st.stim_onset;
+                % If stim has duration after activated, stim_schedule will 
+                % be updated once stim is activated during the trial
+                elseif st.stim_duration > 0
+                    % Duration Flag: Finger lift = -101, Saccade = -102
+                    stim_schedule(s, :) = -100 + st.stim_onset;
+                end
+                
+            elseif st.stim_onset > -1
+                % Find first frame stim is displayed
+                stim_img_on = ceil(st.stim_onset / ifi) + 1;
+                
+                % If stim is finger lift deactivated
+                if st.stim_duration == -1
+                    stim_schedule(s, stim_img_on:end) = -1;
+                % If stim is saccade deactivated
+                elseif st.stim_duration == -2
+                    stim_schedule(s, stim_img_on:end) = -2;
+                % If -3, stim stays on until end of trial after activated
+                elseif st.stim_duration == -3
+                    stim_schedule(s, stim_img_on:end) = 1;
+                % If stim has duration after activated, fill all frames
+                % where this stim is displayed with a 1
+                elseif st.stim_duration > 0
+                    stim_img_off = ceil((st.stim_onset+st.stim_duration) / ifi) + 1;
+                    if stim_img_on ~= stim_img_off
+                        stim_schedule(s, stim_img_on:stim_img_off) = 1;
+                    end
+                end
 
-            % Fill all frames where this stim's mask is displayed with a 1
-            mask_img_on = ceil(st.mask_onset / ifi) + 1;
-            mask_img_off = ceil((st.mask_onset+st.mask_duration) / ifi) + 1;
-            if mask_img_on ~= mask_img_off
-                mask_schedule(s, mask_img_on:mask_img_off) = 1;
+                % Fill all frames where this stim's mask is displayed with a 1
+                mask_img_on = ceil(st.mask_onset / ifi) + 1;
+                mask_img_off = ceil((st.mask_onset+st.mask_duration) / ifi) + 1;
+                if mask_img_on ~= mask_img_off
+                    mask_schedule(s, mask_img_on:mask_img_off) = 1;
+                end
             end
             
             % If stim is a fixation event, save in fixation schedule
@@ -621,7 +662,7 @@ for b=1:num_blocks
         hasSelected = false;
         
         % Cue to determine if a fixation pause is happening
-        isFixation = false;
+        isFixationPause = false;
         
         % Keyboard response
         kb_resp = 'None';
@@ -640,6 +681,11 @@ for b=1:num_blocks
 %         post_fix = 0;
         post_fix_gaze = 0;
         post_fix_touch = 0;
+        
+        % Flags if fingerlift and/or saccade has occured, used to display 
+        % stims which depend on these actions (stim_onset = -1 or -2)
+        is_fingerlift = false;
+        is_saccade = false;
         
         % Detect starting touch/gaze and require lift/saccade to begin
         % recording data
@@ -798,7 +844,9 @@ for b=1:num_blocks
             % Check if fixation appears in current frame
             fixations = find(fixation_schedule(:,frame) ~= 0, 1);
             if ~isempty(fixations)
-                isFixation = true;
+                if any(trial_dat.subj_fixation_pause(fixations))
+                    isFixationPause = true;
+                end
 %                 post_fix = 0;
                 for f=1:length(fixations)
                     fidx = fixations(f);
@@ -817,12 +865,15 @@ for b=1:num_blocks
             % Test each active fixation for gaze/touch and iterate counters       
             active_fixations = find(fixation_counter(:,3) == true, 1);
             if isempty(active_fixations)
-            	if isFixation
-                    isFixation = false;
+            	if isFixationPause
+                    isFixationPause = false;
                     post_fix_touch = 1;
                     post_fix_gaze = 1;
                 end
             else
+                if ~any(trial_dat.subj_fixation_pause(active_fixations))
+                    isFixationPause = false;
+                end
                 for f=1:length(active_fixations)
                     fidx = active_fixations(f);
                     
@@ -875,9 +926,51 @@ for b=1:num_blocks
             
             % Check image and mask schedules and render anything to screen
             % that is scheduled to be shown on the current frame
-            if ~isFixation
+            if ~isFixationPause
                 for s=1:num_stims
-                    if stim_schedule(s, stim_sched_frame) == 1
+                    % Get current entry in stim_schedule
+                    stim_sch_val = stim_schedule(s, stim_sched_frame);
+                    
+                    % If schedule entry conditions are filled, then display
+                    % stim
+                    display_stim = false;
+                    if stim_sch_val == 1
+                        display_stim = true;
+                    elseif stim_sch_val == -1 && is_fingerlift
+                        display_stim = true;
+                    elseif stim_sch_val == -2 && is_saccade
+                        display_stim = true;
+                    elseif stim_sch_val == -12 && is_fingerlift && ~is_saccade
+                        display_stim = true;
+                    elseif stim_sch_val == -21 && ~is_fingerlift && is_saccade
+                        display_stim = true;  
+                    elseif stim_sch_val == -101 && is_fingerlift
+                        display_stim = true;  
+                        % Duration flag invoked - complete stim schedule
+                    	stim_img_off = ceil((stim_sched_frame+trial_dat.stim_duration(s)) / ifi) + 1;
+                        if stim_sched_frame < trial_frames
+                            if stim_img_off > trial_frames 
+                                stim_schedule(s, stim_sched_frame+1:end) = 1;
+                            else
+                                stim_schedule(s, stim_sched_frame+1:stim_img_off-1) = 1;
+                                stim_schedule(s, stim_img_off:end) = 0;
+                            end
+                        end
+                    elseif stim_sch_val == -102 && is_saccade
+                        display_stim = true;  
+                        % Duration flag invoked - complete stim schedule
+                    	stim_img_off = ceil((stim_sched_frame+trial_dat.stim_duration(s)) / ifi) + 1;
+                        if stim_sched_frame < trial_frames
+                            if stim_img_off > trial_frames 
+                                stim_schedule(s, stim_sched_frame+1:end) = 1;
+                            else
+                                stim_schedule(s, stim_sched_frame+1:stim_img_off-1) = 1;
+                                stim_schedule(s, stim_img_off:end) = 0;
+                            end
+                        end
+                    end
+                    
+                    if display_stim
                         stim_name = char(trial_dat.stim_img_name(s));
 
                         % Detect if backgroudnd color changed
@@ -1009,6 +1102,7 @@ for b=1:num_blocks
             if post_fix_gaze
                 % If saccade occurs, note time & start rt counter
                 if start_saccade
+                    is_saccade = true;
                     rt_start_saccade = frame;
                     rt_target_to_saccade = frame - rt_start_target_onset;
                     start_saccade = false;
@@ -1020,6 +1114,7 @@ for b=1:num_blocks
             if post_fix_touch
                 % If finger lift occurs, note time & start rt counter
                 if start_fingerlift
+                    is_fingerlift = true;
                     rt_start_fingerlift = frame;
                     rt_target_to_fingerlift = frame - rt_start_target_onset;
                     start_fingerlift = false;
@@ -1033,7 +1128,7 @@ for b=1:num_blocks
             end
                 
             % If not in a fixation pause, iterate stim schedule
-            if ~isFixation
+            if ~isFixationPause
                 stim_sched_frame = stim_sched_frame + next_frame;
             end
             
