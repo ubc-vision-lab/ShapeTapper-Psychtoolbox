@@ -308,7 +308,9 @@ data_columns = {'participant',...
                 'touch_point_y',...
                 'touch_point_relative_x',...
                 'touch_point_relative_y',...
-                'keyboard_response',...
+                'keyboard_user_response',...
+                'keyboard_corr_response',...
+                'keyboard_correct',...
                 'trial_time_elapsed',...
                 'rt_target_to_choice',...
                 'rt_target_to_saccade',...
@@ -526,10 +528,10 @@ for b=1:num_blocks
                 
                 % If stim is finger lift deactivated
                 if st.stim_duration == -1
-                    stim_schedule(s, stim_img_on:end) = -1;
+                    stim_schedule(s, stim_img_on:end) = -11;
                 % If stim is saccade deactivated
                 elseif st.stim_duration == -2
-                    stim_schedule(s, stim_img_on:end) = -2;
+                    stim_schedule(s, stim_img_on:end) = -22;
                 % If -3, stim stays on until end of trial after activated
                 elseif st.stim_duration == -3
                     stim_schedule(s, stim_img_on:end) = 1;
@@ -633,6 +635,9 @@ for b=1:num_blocks
 
         % -- Initialize trial variables, timing table ---------------------
 
+        % Nominal trial frames
+        nominal_frames = nan(1, trial_frames);
+        
         % Init time stamps (will be overwritten on first Screen flip)
         trial_timestamps = nan(4, trial_frames);
         
@@ -668,11 +673,12 @@ for b=1:num_blocks
         % Keyboard response
         kb_resp = 'None';
         
-        % Frame counters: one for total elapsed time (incl. fixation pause)
-        % and one for stimuli schedule
+        % Frame counters: (frame) for stimuli schedule
+        % and (glob_frame) for total elapsed (incl. fixation pause)
         frame = 1;
+        glob_frame = 1;
         init_frame = 1; % actual first frame (if fixation pause on frame 1)
-        stim_sched_frame = 1;
+        %stim_sched_frame = 1;
         
         % This state is true prior to target onset, false after (used for
         % reaction time calculation)
@@ -831,7 +837,7 @@ for b=1:num_blocks
                 end
                 
                 % Test if saccade has occurred, start response period 2
-                if post_fix_gaze == 1
+                if post_fix_gaze == 1 && isnan(rt_start_saccade)
                     % If gaze no longer persists on pfidx (previous fixaition)
                     if ~ptb_in_circ(stim_centers(gpfidx,:), [gx gy], stim_radius(gpfidx)*1.5)
                         start_saccade = true;
@@ -841,7 +847,7 @@ for b=1:num_blocks
             end 
                
             % Test if finger lift has occurred, start response period 2
-            if post_fix_touch == 1 && ~is_touch
+            if post_fix_touch == 1 && ~is_touch && isnan(rt_start_fingerlift)
                 start_fingerlift = true;
                 post_fix_touch = 0;
             end
@@ -966,6 +972,10 @@ for b=1:num_blocks
                     elseif stim_sch_val == -1 && is_fingerlift
                         display_stim = true;
                     elseif stim_sch_val == -2 && is_saccade
+                        display_stim = true;
+                    elseif stim_sch_val == -11 && ~is_fingerlift
+                        display_stim = true;
+                    elseif stim_sch_val == -22 && ~is_saccade
                         display_stim = true;
                     elseif stim_sch_val == -12 && is_fingerlift && ~is_saccade
                         display_stim = true;
@@ -1147,27 +1157,23 @@ for b=1:num_blocks
             
             % If a fixation has occured, record finger lift or saccade
             % reaction time
-            if post_fix_gaze
-                % If saccade occurs, note time & start rt counter
-                if start_saccade
-                    is_saccade = true;
-                    rt_start_saccade = frame;
-                    rt_target_to_saccade = frame - rt_start_target_onset;
-                    start_saccade = false;
-                end
+            % If saccade occurs, note time & start rt counter
+            if start_saccade
+                is_saccade = true;
+                rt_start_saccade = frame;
+                rt_target_to_saccade = frame - rt_start_target_onset;
+                start_saccade = false;
             end
             
             % If a fixation has occured, record finger lift or saccade
             % reaction time
-            if post_fix_touch
-                % If finger lift occurs, note time & start rt counter
-                if start_fingerlift
-                    is_fingerlift = true;
-                    rt_start_fingerlift = frame;
-                    rt_target_to_fingerlift = frame - rt_start_target_onset;
-                    start_fingerlift = false;
-                end
-            end % if post_fix
+            % If finger lift occurs, note time & start rt counter
+            if start_fingerlift
+                is_fingerlift = true;
+                rt_start_fingerlift = frame;
+                rt_target_to_fingerlift = frame - rt_start_target_onset;
+                start_fingerlift = false;
+            end
             
             % End trial if selection has been made
             if hasSelected == true
@@ -1186,6 +1192,10 @@ for b=1:num_blocks
                 frame = frame + next_frame;
 %                 stim_sched_frame = stim_sched_frame + next_frame;
             end
+            
+            % Save nominal frame for data output 
+            nominal_frames(glob_frame) = frame;
+            glob_frame = glob_frame + 1;
             
             % Iterate trial frame counter
 %             frame = frame + next_frame;
@@ -1332,7 +1342,7 @@ for b=1:num_blocks
         end
         
         % Output frame-by-frame timestamp/presentation record
-        timestamp_record = [1:trial_frames; trial_timestamps; stim_presentations; trial_touch_samples; trial_gaze_samples]';
+        timestamp_record = [nominal_frames; trial_timestamps; stim_presentations; trial_touch_samples; trial_gaze_samples]';
         timestamp_labels = {'frame_number','timestamp',...
                             'stimulus_onset_time',...
                             'flip_timestamp','missed'};
@@ -1406,6 +1416,10 @@ for b=1:num_blocks
             % Save relative touchpoint in participant trial data
         	partData.touch_point_relative_x{row_ct} = tp_rel_x;
             partData.touch_point_relative_y{row_ct} = tp_rel_y;
+            
+            kb_correct = strcmp(ch.correct_kb_resp, kb_resp);
+            partData.keyboard_corr_response{row_ct} = cell2mat(ch.correct_kb_resp);
+            partData.keyboard_correct{row_ct} = kb_correct;
         else
             % Non-stim touch, mark as bad trial
             partData.BadTrial{row_ct} = 1;
@@ -1414,7 +1428,7 @@ for b=1:num_blocks
         partData.choice_correct{row_ct} = correct_choice;
         partData.touch_point_x{row_ct} = tx;
         partData.touch_point_y{row_ct} = ty;
-        partData.keyboard_response{row_ct} = kb_resp;
+        partData.keyboard_user_response{row_ct} = kb_resp;
         partData.trial_time_elapsed{row_ct} = (trial_frames_elapsed+1) * ifi;
         partData.rt_target_to_choice{row_ct} = rt_target_to_choice * ifi;
         partData.rt_target_to_saccade{row_ct} = rt_target_to_saccade * ifi;
