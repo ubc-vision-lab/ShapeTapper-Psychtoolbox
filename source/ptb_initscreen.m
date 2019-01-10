@@ -38,7 +38,7 @@ screens = Screen('Screens');
 % have two screens attached to our monitor we will draw to the external
 % screen. When only one screen is attached to the monitor we will draw to
 % this. For help see: help max
-ptb.screenNumber = 1; %max(screens);
+ptb.screenNumber = 1;% max(screens);
 
 % Hide cursor for touchscreen display (will use ShowCursor on program exit)
 HideCursor(ptb.screenNumber);

@@ -60,7 +60,7 @@ out_path = 'Data/';
 
 % Safety margin added to touchable area around stimulus images 
 % (touchable area is the defined as the smallest circle containing image)
-TOUCH_MARGIN_CM = 1;
+TOUCH_MARGIN_CM = 3;
 
 %----------------------------------------------------------------------
 %                       Experimenter Setup
@@ -552,7 +552,8 @@ for b=1:num_blocks
             
             % If stim is a fixation event, save in fixation schedule
             if st.subj_fixation_type ~= 0
-                fixation_schedule(s, st.subj_fixation_onset + 1) = st.subj_fixation_type;
+                stim_fix_on = ceil(st.subj_fixation_onset / ifi) + 1;
+                fixation_schedule(s, stim_fix_on) = st.subj_fixation_type;
                 fixation_frames = ceil(st.subj_fixation_duration / ifi);
                 fixation_counter(s, 1) = fixation_frames;
             end
@@ -670,6 +671,7 @@ for b=1:num_blocks
         % Frame counters: one for total elapsed time (incl. fixation pause)
         % and one for stimuli schedule
         frame = 1;
+        init_frame = 1; % actual first frame (if fixation pause on frame 1)
         stim_sched_frame = 1;
         
         % This state is true prior to target onset, false after (used for
@@ -691,6 +693,9 @@ for b=1:num_blocks
         % recording data
         touch_on_start = 0;
         gaze_on_start = 0;
+        
+        % Detect if finger is on touch fixation
+        onFix = 0;
         
         % Initialize Optotrak recording
         if useOptotrak
@@ -754,7 +759,7 @@ for b=1:num_blocks
             is_touch = any(buttons ~= 0);
 
             % Detect touch/gaze on trial start
-            if frame == 1
+            if init_frame == 1
                 if is_touch
                     touch_on_start = true;
                 end
@@ -824,16 +829,16 @@ for b=1:num_blocks
                         gy = NaN;
                     end
                 end
-            end
                 
-            % Test if saccade has occurred, start response period 2
-            if post_fix_gaze == 1
-                % If gaze no longer persists on pfidx (previous fixaition)
-                if ~ptb_in_circ(stim_centers(gpfidx,:), [gx gy], stim_radius(gpfidx)*1.5)
-                    start_saccade = true;
-                    post_fix_gaze = 0;
-                end
-            end    
+                % Test if saccade has occurred, start response period 2
+                if post_fix_gaze == 1
+                    % If gaze no longer persists on pfidx (previous fixaition)
+                    if ~ptb_in_circ(stim_centers(gpfidx,:), [gx gy], stim_radius(gpfidx)*1.5)
+                        start_saccade = true;
+                        post_fix_gaze = 0;
+                    end
+                end   
+            end 
                
             % Test if finger lift has occurred, start response period 2
             if post_fix_touch == 1 && ~is_touch
@@ -842,14 +847,31 @@ for b=1:num_blocks
             end
             
             % Check if fixation appears in current frame
-            fixations = find(fixation_schedule(:,frame) ~= 0, 1);
-            if ~isempty(fixations)
-                if any(trial_dat.subj_fixation_pause(fixations))
+            active_fixations = find(fixation_schedule(:,frame) ~= 0);
+            
+            % If in fixation pause for current frame
+            if isFixationPause
+                % Get pause fixation indices
+                pasue_fix = (trial_dat.subj_fixation_pause(active_fixations) == 1);
+                
+                % Find any satisfied pause fixations and deactivate
+                pause_fix_done = fixation_counter(pasue_fix,3) == 0;
+                active_fixations(pause_fix_done) = [];
+                
+                % If all pause fixations are satisfied, deactivate pause
+                if all(pause_fix_done)
+                    isFixationPause = false;
+                end
+            end
+            
+            % Populate fixation counter with any currently active fixations
+            if ~isempty(active_fixations)
+                if any(trial_dat.subj_fixation_pause(active_fixations))
                     isFixationPause = true;
                 end
 %                 post_fix = 0;
-                for f=1:length(fixations)
-                    fidx = fixations(f);
+                for f=1:length(active_fixations)
+                    fidx = active_fixations(f);
                     % Set fixation to active
                     fixation_counter(fidx,3) = true;
                     % Note fixation type in counter
@@ -863,17 +885,17 @@ for b=1:num_blocks
             end
             
             % Test each active fixation for gaze/touch and iterate counters       
-            active_fixations = find(fixation_counter(:,3) == true, 1);
+            active_fixations = find(fixation_counter(:,3) ~= 0);
             if isempty(active_fixations)
             	if isFixationPause
                     isFixationPause = false;
-                    post_fix_touch = 1;
-                    post_fix_gaze = 1;
                 end
+                post_fix_touch = 1;
+                post_fix_gaze = 1;
             else
-                if ~any(trial_dat.subj_fixation_pause(active_fixations))
-                    isFixationPause = false;
-                end
+%                 if ~any(trial_dat.subj_fixation_pause(active_fixations))
+%                     isFixationPause = false;
+%                 end
                 for f=1:length(active_fixations)
                     fidx = active_fixations(f);
                     
@@ -882,13 +904,17 @@ for b=1:num_blocks
                         [ptb, bg_color_change] = ptb_set_bg_color(cell2mat(trial_dat.background_color(fidx)), cell2mat(trial_dat.text_color(fidx)), ptb);
                     end
 
-                    % Render fixation image
-                    fix_name = char(trial_dat.stim_img_name(fidx));
-                    Screen('DrawTextures', window,...
-                            stim_textures(fix_name),[],...
-                            stim_bounds(fidx,:), ...
-                            trial_dat.stim_rotation(fidx));
-                    stim_presentations(fidx, frame) = 1;
+                    if isFixationPause
+                        if trial_dat.subj_fixation_pause(fidx)
+                            % Render fixation image
+                            fix_name = char(trial_dat.stim_img_name(fidx));
+                            Screen('DrawTextures', window,...
+                                    stim_textures(fix_name),[],...
+                                    stim_bounds(fidx,:), ...
+                                    trial_dat.stim_rotation(fidx));
+                            stim_presentations(fidx, frame) = 1;
+                        end
+                    end
                     
                     % If fixation is touch type check for touch, reset if
                     % touch lifted
@@ -929,7 +955,8 @@ for b=1:num_blocks
             if ~isFixationPause
                 for s=1:num_stims
                     % Get current entry in stim_schedule
-                    stim_sch_val = stim_schedule(s, stim_sched_frame);
+                    stim_sch_val = stim_schedule(s, frame);
+                    %stim_sch_val = stim_schedule(s, stim_sched_frame);
                     
                     % If schedule entry conditions are filled, then display
                     % stim
@@ -947,24 +974,32 @@ for b=1:num_blocks
                     elseif stim_sch_val == -101 && is_fingerlift
                         display_stim = true;  
                         % Duration flag invoked - complete stim schedule
-                    	stim_img_off = ceil((stim_sched_frame+trial_dat.stim_duration(s)) / ifi) + 1;
-                        if stim_sched_frame < trial_frames
+                        stim_img_off = ceil((frame+trial_dat.stim_duration(s)) / ifi) + 1;
+                    	%stim_img_off = ceil((stim_sched_frame+trial_dat.stim_duration(s)) / ifi) + 1;
+                        if frame < trial_frames
+                        %if stim_sched_frame < trial_frames    
                             if stim_img_off > trial_frames 
-                                stim_schedule(s, stim_sched_frame+1:end) = 1;
+                                stim_schedule(s, frame+1:end) = 1;
+                                %stim_schedule(s, stim_sched_frame+1:end) = 1;
                             else
-                                stim_schedule(s, stim_sched_frame+1:stim_img_off-1) = 1;
+                                stim_schedule(s, frame+1:stim_img_off-1) = 1;
+                                %stim_schedule(s, stim_sched_frame+1:stim_img_off-1) = 1;
                                 stim_schedule(s, stim_img_off:end) = 0;
                             end
                         end
                     elseif stim_sch_val == -102 && is_saccade
                         display_stim = true;  
                         % Duration flag invoked - complete stim schedule
-                    	stim_img_off = ceil((stim_sched_frame+trial_dat.stim_duration(s)) / ifi) + 1;
-                        if stim_sched_frame < trial_frames
+                        stim_img_off = ceil((frame+trial_dat.stim_duration(s)) / ifi) + 1;
+                    	%stim_img_off = ceil((stim_sched_frame+trial_dat.stim_duration(s)) / ifi) + 1;
+                        if frame < trial_frames
+                        %if stim_sched_frame < trial_frames    
                             if stim_img_off > trial_frames 
-                                stim_schedule(s, stim_sched_frame+1:end) = 1;
+                                stim_schedule(s, frame+1:end) = 1;
+                                %stim_schedule(s, stim_sched_frame+1:end) = 1;
                             else
-                                stim_schedule(s, stim_sched_frame+1:stim_img_off-1) = 1;
+                                stim_schedule(s, frame+1:stim_img_off-1) = 1;
+                                %stim_schedule(s, stim_sched_frame+1:stim_img_off-1) = 1;
                                 stim_schedule(s, stim_img_off:end) = 0;
                             end
                         end
@@ -992,7 +1027,8 @@ for b=1:num_blocks
                             start_target_onset = true;
                         end
                     end % image scheduled
-                    if mask_schedule(s, stim_sched_frame) == 1
+                    if mask_schedule(s, frame) == 1
+                    %if mask_schedule(s, stim_sched_frame) == 1    
                         % Draw mask dots
                         Screen('DrawDots', window, dotPosMatrix{s},...
                                 dotSizes{s}, dotColors{s}, [], 2);
@@ -1039,18 +1075,30 @@ for b=1:num_blocks
                             end% touched stim
                         end
                         
+                        % If stim is touch fixation, detect if touched
+                        if trial_dat.subj_fixation_type(s) == 1
+                            if ptb_in_circ(stim_centers(s,:), [tx ty], stim_radius(s)) && is_touch
+                                stim_is_touched = true;
+                            end% touched stim
+                        end
+                        
                         if stim_is_touched
-                            hasSelected = true;
-                            selectedStim = s;
-                            if bad_trials(t)
-                                bad_trials(t) = false;
+                            if trial_dat.subj_fixation_type(s) == 1
+                                onFix = true;
+                            else
+                                hasSelected = true;
+                                onFix = false;
+                                selectedStim = s;
+                                if bad_trials(t)
+                                    bad_trials(t) = false;
+                                end
                             end
                         end
                     end % image displayed & touchable
                 end
                 % Check for any non-stim touches, add trial to list of bad
                 % trials to repeat at end of block
-                if any(stim_displayed) && ~hasSelected && is_touch
+                if any(stim_displayed) && ~hasSelected && is_touch && ~onFix
                     hasSelected = true;
                     selectedStim = NaN;
                     bad_trials(t) = true;
@@ -1127,13 +1175,20 @@ for b=1:num_blocks
                 break
             end
                 
+            % Turn off initial frame
+            if init_frame
+                init_frame = false;
+            end
+            
             % If not in a fixation pause, iterate stim schedule
             if ~isFixationPause
-                stim_sched_frame = stim_sched_frame + next_frame;
+                % Iterate trial frame counter
+                frame = frame + next_frame;
+%                 stim_sched_frame = stim_sched_frame + next_frame;
             end
             
             % Iterate trial frame counter
-            frame = frame + next_frame;
+%             frame = frame + next_frame;
             
         end % frame loop
         

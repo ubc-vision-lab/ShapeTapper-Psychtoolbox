@@ -4,7 +4,7 @@ function [ stim_textures ] = ptb_loadtextures(stim_dir, img_names, img_formats, 
 % store handles in a Map object
 stim_textures = containers.Map;
 
-if isempty(fb_img_names)
+if isempty(img_names)
     return;
 end
 
