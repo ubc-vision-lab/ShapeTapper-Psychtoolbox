@@ -793,9 +793,9 @@ for b=1:num_blocks
             ty = min(ty, ptb.screenYpixels);
 
             % Store touch location and whether finger is touching
-            trial_touch_samples(1, frame) = tx;
-            trial_touch_samples(2, frame) = ty;
-            trial_touch_samples(3, frame) = is_touch;
+            trial_touch_samples(1, glob_frame) = tx;
+            trial_touch_samples(2, glob_frame) = ty;
+            trial_touch_samples(3, glob_frame) = is_touch;
             
             gaze_good = false;
             
@@ -834,6 +834,9 @@ for b=1:num_blocks
                         gx = NaN;
                         gy = NaN;
                     end
+                    
+                    trial_gaze_samples(1, glob_frame) = gx;
+                    trial_gaze_samples(2, glob_frame) = gy;
                 end
                 
                 % Test if saccade has occurred, start response period 2
@@ -858,10 +861,10 @@ for b=1:num_blocks
             % If in fixation pause for current frame
             if isFixationPause
                 % Get pause fixation indices
-                pasue_fix = (trial_dat.subj_fixation_pause(active_fixations) == 1);
+                pause_fix = (trial_dat.subj_fixation_pause(active_fixations) == 1);
                 
                 % Find any satisfied pause fixations and deactivate
-                pause_fix_done = fixation_counter(pasue_fix,3) == 0;
+                pause_fix_done = fixation_counter(pause_fix,3) == 0;
                 active_fixations(pause_fix_done) = [];
                 
                 % If all pause fixations are satisfied, deactivate pause
@@ -899,27 +902,27 @@ for b=1:num_blocks
                 post_fix_touch = 1;
                 post_fix_gaze = 1;
             else
-%                 if ~any(trial_dat.subj_fixation_pause(active_fixations))
-%                     isFixationPause = false;
-%                 end
+                if isFixationPause
+                    active_p_fixations = find(fixation_schedule(:,frame) ~= 0);
+                    pause_fix = find(trial_dat.subj_fixation_pause(active_p_fixations) == 1);
+                    for pf=1:length(pause_fix)
+                        pfidx = pause_fix(pf);
+                        % Render fixation image
+                        pfix_name = char(trial_dat.stim_img_name(pfidx));
+                        Screen('DrawTextures', window,...
+                                stim_textures(pfix_name),[],...
+                                stim_bounds(pfidx,:), ...
+                                trial_dat.stim_rotation(pfidx));
+                        stim_presentations(pfidx, glob_frame) = 1;
+                    end
+                end
+                
                 for f=1:length(active_fixations)
                     fidx = active_fixations(f);
                     
                     % Detect if background color changed
                     if ~bg_color_change
                         [ptb, bg_color_change] = ptb_set_bg_color(cell2mat(trial_dat.background_color(fidx)), cell2mat(trial_dat.text_color(fidx)), ptb);
-                    end
-
-                    if isFixationPause
-                        if trial_dat.subj_fixation_pause(fidx)
-                            % Render fixation image
-                            fix_name = char(trial_dat.stim_img_name(fidx));
-                            Screen('DrawTextures', window,...
-                                    stim_textures(fix_name),[],...
-                                    stim_bounds(fidx,:), ...
-                                    trial_dat.stim_rotation(fidx));
-                            stim_presentations(fidx, frame) = 1;
-                        end
                     end
                     
                     % If fixation is touch type check for touch, reset if
@@ -1029,7 +1032,7 @@ for b=1:num_blocks
                                 stim_bounds(s,:), trial_dat.stim_rotation(s));
 
                         % Record stim presentation in global frame counter 
-                        stim_presentations(s, frame) = 1;
+                        stim_presentations(s, glob_frame) = 1;
                         stim_displayed(s) = 1;
                         
                         % If stim is target, begin reaction time counter
@@ -1045,7 +1048,7 @@ for b=1:num_blocks
 
                         % Record mask presentation in global frame counter
                         % Stim only = 1, mask only = 2, stim & mask = 3
-                        stim_presentations(s, frame) = stim_presentations(s, frame) + 2;
+                        stim_presentations(s, glob_frame) = stim_presentations(s, glob_frame) + 2;
                     end % mask scheduled
                 end % stim loop
                 
@@ -1129,7 +1132,7 @@ for b=1:num_blocks
             [vbl, sot, flip, miss, ~] = Screen('Flip', window, vbl + (waitframes - 0.5) * ifi);
                         
             % Store exact timestamp and max error for current frame
-            trial_timestamps(:, frame) = [vbl, sot, flip, miss];
+            trial_timestamps(:, glob_frame) = [vbl, sot, flip, miss];
             
             % If missed frame, iterate 2 frames to stay on track.
             missed_frame = (miss > 0);
@@ -1177,6 +1180,7 @@ for b=1:num_blocks
             
             % End trial if selection has been made
             if hasSelected == true
+                nominal_frames(glob_frame) = frame;
                 correct_choice = (selectedStim == targetStim);
                 break
             end
@@ -1264,7 +1268,6 @@ for b=1:num_blocks
                         '\t','newline','pc','precision',12);
             disp('Success!')
         end
-        
         
         % Save total trial time
         trial_frames_elapsed = min(frame, trial_frames);
