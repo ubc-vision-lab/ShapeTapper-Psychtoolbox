@@ -47,6 +47,8 @@ timeoutMsg = 'Trial Time Expired.\n\n\nPress Any Key To Continue';
 feedback_message_correct = 'Correct!';
 feedback_message_incorrect = 'Incorrect!';
 
+gaze_message_lost_gaze = 'Lost gaze!';
+
 kbrespMsg = 'Letter?';
 
 % Acceptable stimulus image formats, must be compatible with imread()
@@ -61,6 +63,10 @@ out_path = 'Data/';
 % Safety margin added to touchable area around stimulus images 
 % (touchable area is the defined as the smallest circle containing image)
 TOUCH_MARGIN_CM = 3;
+
+% Amount of time (ms) we may lost gaze or fixation before aborting trial
+GAZE_MAX_LOST_TIME = 500;
+FIX_MAX_LOST_TIME = 50;
 
 %----------------------------------------------------------------------
 %                       Experimenter Setup
@@ -114,7 +120,6 @@ demog_dat = readtable(demog_fname);
 matches_participant = strcmp(part_dems.id, demog_dat.ParticipantID);
 matches_config =  strcmp(part_dems.config_name, demog_dat.Config_File);
 if any(all([matches_participant matches_config],2))
-    match_idx = find(all([matches_participant matches_config],2));
     
     % Include the desired Default answer
     opts.Interpreter = 'tex';
@@ -198,8 +203,6 @@ end
 
 % Set threshold for bad EyeLink samples in a given trial
 eyelink_bad_count = 0; % count the # of times Eyelink has missed an eye
-eyelink_err_threshold = 100; % if Eyelink misses # in a row, then quit
-
 
 %----------------------------------------------------------------------
 %                       Optotrak Setup
@@ -318,9 +321,13 @@ data_columns = {'participant',...
                 'rt_target_to_fingerlift',...
                 'rt_fingerlift_to_choice'};
 
-partData = cell2table(cell(2*tot_num_trials, length(data_columns)),...
+partData = cell2table(cell(tot_num_trials, length(data_columns)),...
                       'VariableNames',data_columns);
 
+% Preallocate blank data row to expand data output if necessary
+blank_data_row = array2table(nan(1,length(data_columns)),...
+                        'VariableNames',partData.Properties.VariableNames);
+                  
 % Counter for correct row indexing when writing output
 row_ct = 1;
 
@@ -415,7 +422,7 @@ for b=1:num_blocks
         % If all trials have been presented
         if t > num_trials
            % If no bad trials, then complete block
-           if isempty(find(bad_trials))
+           if isempty(find(bad_trials > 0, 1))
                rpt_bad_trials = false;
                block_complete = true;
                continue
@@ -427,7 +434,7 @@ for b=1:num_blocks
         
         % If we are repeating bad trials, then randomly present a bad trial
         if rpt_bad_trials
-            bad_trials_remaining = find(bad_trials);
+            bad_trials_remaining = find(bad_trials > 0);
             % If no bad trials, then complete block
             if isempty(bad_trials_remaining)
                rpt_bad_trials = false;
@@ -465,7 +472,7 @@ for b=1:num_blocks
         fixation_schedule = zeros(num_stims, trial_frames);
         
         % Initialize counters for fixation durations
-        fixation_counter = zeros(num_stims, 3);
+        fixation_counter = zeros(num_stims, 5);
 
         % Initialize record of stim displayed
         stim_displayed = zeros(num_stims, 1);
@@ -482,7 +489,7 @@ for b=1:num_blocks
         dotBoundingRect = cell(1,num_stims);
 
         % Declare target mask
-        targetStim = NaN;
+        targetStims = find(trial_dat.stim_is_target == 1);
         selectedStim = NaN;
         correct_choice = false;
         
@@ -491,11 +498,11 @@ for b=1:num_blocks
             % Extract stimulus properties from trial row
             st = trial_dat(s,:);
             
-            % Store target mask if it matches stim description
-            % NOTE: assumption (FOR NOW) is that only 1 stim is the target
-            if st.stim_is_target
-                targetStim = s;
-            end
+%             % Store target mask if it matches stim description
+%             % NOTE: assumption (FOR NOW) is that only 1 stim is the target
+%             if st.stim_is_target
+%                 targetStim = s;
+%             end
             
             % Check if stimulus is activated by user action (finger lift,
             % saccade) or scheduled event, then store timing info in sched
@@ -678,7 +685,10 @@ for b=1:num_blocks
         frame = 1;
         glob_frame = 1;
         init_frame = 1; % actual first frame (if fixation pause on frame 1)
-        %stim_sched_frame = 1;
+        
+        % Counts number of consecutive frames fixation or gaze is lost
+        lost_fix_max_frames = ceil(FIX_MAX_LOST_TIME / ifi);
+        lost_gaze_max_frames = ceil(GAZE_MAX_LOST_TIME / ifi);
         
         % This state is true prior to target onset, false after (used for
         % reaction time calculation)
@@ -817,6 +827,11 @@ for b=1:num_blocks
                     eyelink_bad_count = 0; % reset the counter for bad 
                 end
                 
+                if eyelink_bad_count > lost_gaze_max_frames
+                    bad_trials(t) = -1;
+                    break
+                end
+                
                 % check for presence of a new sample update
                 if Eyelink('NewFloatSampleAvailable') > 0
                     
@@ -834,9 +849,6 @@ for b=1:num_blocks
                         gx = NaN;
                         gy = NaN;
                     end
-                    
-                    trial_gaze_samples(1, glob_frame) = gx;
-                    trial_gaze_samples(2, glob_frame) = gy;
                 end
                 
                 % Test if saccade has occurred, start response period 2
@@ -847,7 +859,14 @@ for b=1:num_blocks
                         post_fix_gaze = 0;
                     end
                 end   
-            end 
+            else
+                gx = NaN;
+                gy = NaN;
+            end
+            
+            % Add gaze sample to trial array
+            trial_gaze_samples(1, glob_frame) = gx;
+            trial_gaze_samples(2, glob_frame) = gy;
                
             % Test if finger lift has occurred, start response period 2
             if post_fix_touch == 1 && ~is_touch && isnan(rt_start_fingerlift)
@@ -896,14 +915,14 @@ for b=1:num_blocks
             % Test each active fixation for gaze/touch and iterate counters       
             active_fixations = find(fixation_counter(:,3) ~= 0);
             if isempty(active_fixations)
-            	if isFixationPause
+                if isFixationPause
                     isFixationPause = false;
                 end
                 post_fix_touch = 1;
                 post_fix_gaze = 1;
             else
                 if isFixationPause
-                    active_p_fixations = find(fixation_schedule(:,frame) ~= 0);
+                    active_p_fixations = fixation_schedule(:,frame) ~= 0;
                     pause_fix = find(trial_dat.subj_fixation_pause(active_p_fixations) == 1);
                     for pf=1:length(pause_fix)
                         pfidx = pause_fix(pf);
@@ -929,10 +948,11 @@ for b=1:num_blocks
                     % touch lifted
                     if fixation_counter(fidx,4) == 1
                         if ptb_in_circ(stim_centers(fidx,:), [tx ty], stim_radius(fidx)) && is_touch
-%                         if IsInRect(tx, ty, dotBoundingRect{fidx})% && is_touch
                             fixation_counter(fidx,2) = fixation_counter(fidx,2) + 1;
+                            fixation_counter(fidx,5) = 0;
                         else
                             fixation_counter(fidx,2) = 0;
+                            fixation_counter(fidx,5) = fixation_counter(fidx,5) + 1;
                         end % touched fixation mask
                     end
                         
@@ -941,9 +961,16 @@ for b=1:num_blocks
                     if fixation_counter(fidx,4) == 2
                         if ptb_in_circ(stim_centers(fidx,:), [gx gy], stim_radius(fidx)*1.5)
                             fixation_counter(fidx,2) = fixation_counter(fidx,2) + 1;
+                            fixation_counter(fidx,5) = 0;
                         else
                             fixation_counter(fidx,2) = 0;
+                            fixation_counter(fidx,5) = fixation_counter(fidx,5) + 1;
                         end % touched fixation mask
+                    end
+                    
+                    if fixation_counter(fidx,5) > lost_fix_max_frames
+                        bad_trials(t) = 1;
+                        break
                     end
                     
                     % If participant fixation duration exceeds requirement,
@@ -965,7 +992,6 @@ for b=1:num_blocks
                 for s=1:num_stims
                     % Get current entry in stim_schedule
                     stim_sch_val = stim_schedule(s, frame);
-                    %stim_sch_val = stim_schedule(s, stim_sched_frame);
                     
                     % If schedule entry conditions are filled, then display
                     % stim
@@ -988,15 +1014,12 @@ for b=1:num_blocks
                         display_stim = true;  
                         % Duration flag invoked - complete stim schedule
                         stim_img_off = ceil((frame+trial_dat.stim_duration(s)) / ifi) + 1;
-                    	%stim_img_off = ceil((stim_sched_frame+trial_dat.stim_duration(s)) / ifi) + 1;
                         if frame < trial_frames
                         %if stim_sched_frame < trial_frames    
                             if stim_img_off > trial_frames 
                                 stim_schedule(s, frame+1:end) = 1;
-                                %stim_schedule(s, stim_sched_frame+1:end) = 1;
                             else
                                 stim_schedule(s, frame+1:stim_img_off-1) = 1;
-                                %stim_schedule(s, stim_sched_frame+1:stim_img_off-1) = 1;
                                 stim_schedule(s, stim_img_off:end) = 0;
                             end
                         end
@@ -1004,15 +1027,12 @@ for b=1:num_blocks
                         display_stim = true;  
                         % Duration flag invoked - complete stim schedule
                         stim_img_off = ceil((frame+trial_dat.stim_duration(s)) / ifi) + 1;
-                    	%stim_img_off = ceil((stim_sched_frame+trial_dat.stim_duration(s)) / ifi) + 1;
                         if frame < trial_frames
                         %if stim_sched_frame < trial_frames    
                             if stim_img_off > trial_frames 
                                 stim_schedule(s, frame+1:end) = 1;
-                                %stim_schedule(s, stim_sched_frame+1:end) = 1;
                             else
                                 stim_schedule(s, frame+1:stim_img_off-1) = 1;
-                                %stim_schedule(s, stim_sched_frame+1:stim_img_off-1) = 1;
                                 stim_schedule(s, stim_img_off:end) = 0;
                             end
                         end
@@ -1035,8 +1055,8 @@ for b=1:num_blocks
                         stim_presentations(s, glob_frame) = 1;
                         stim_displayed(s) = 1;
                         
-                        % If stim is target, begin reaction time counter
-                        if s == targetStim && pre_target
+                        % If stim is a target, begin reaction time counter
+                        if any(targetStims == s) && pre_target
                             start_target_onset = true;
                         end
                     end % image scheduled
@@ -1106,15 +1126,18 @@ for b=1:num_blocks
                                     bad_trials(t) = false;
                                 end
                             end
+                        else
+                            onFix = false;
                         end
                     end % image displayed & touchable
                 end
+                
                 % Check for any non-stim touches, add trial to list of bad
                 % trials to repeat at end of block
                 if any(stim_displayed) && ~hasSelected && is_touch && ~onFix
                     hasSelected = true;
                     selectedStim = NaN;
-                    bad_trials(t) = true;
+                    bad_trials(t) = 2;
                 end
             end % if fixation pause
                 
@@ -1126,7 +1149,6 @@ for b=1:num_blocks
                 Screen('FrameOval', window, ptb.white,gazeRect,6,6);       
                 Screen('DrawText', window, mos_pos, gx+50, gy+50);
             end
-            
             
             % Flip to the screen
             [vbl, sot, flip, miss, ~] = Screen('Flip', window, vbl + (waitframes - 0.5) * ifi);
@@ -1181,7 +1203,7 @@ for b=1:num_blocks
             % End trial if selection has been made
             if hasSelected == true
                 nominal_frames(glob_frame) = frame;
-                correct_choice = (selectedStim == targetStim);
+                correct_choice = any(targetStims == selectedStim);
                 break
             end
                 
@@ -1194,15 +1216,11 @@ for b=1:num_blocks
             if ~isFixationPause
                 % Iterate trial frame counter
                 frame = frame + next_frame;
-%                 stim_sched_frame = stim_sched_frame + next_frame;
             end
             
             % Save nominal frame for data output 
             nominal_frames(glob_frame) = frame;
             glob_frame = glob_frame + 1;
-            
-            % Iterate trial frame counter
-%             frame = frame + next_frame;
             
         end % frame loop
         
@@ -1291,8 +1309,49 @@ for b=1:num_blocks
                 end
             end
         elseif ~abort_experiment
+            % Display bad trial message
+            if bad_trials(t) > 0
+                % Set text and background color to match first trial
+                if ~bg_color_change
+                    [ptb, bg_color_change] = ptb_set_bg_color(cell2mat(trial_dat.background_color(num_stims)), cell2mat(trial_dat.text_color(num_stims)), ptb);
+                end
+
+                % Clear screen
+                Screen('Flip', window);
+                
+                if strcmp(trial_dat.trial_feedback_img(end), 'None')
+                    feedbackMsg = feedback_message_incorrect;
+                    Screen('Flip', window);
+                    DrawFormattedText(window, feedbackMsg, 'center', 'center', ptb.text_color);
+                else
+                    fb_fname = char(trial_dat.trial_feedback_img(num_stims));
+                    Screen('DrawTextures', window, fb_textures(fb_fname), [], [], 0);
+                end
+                
+                Screen('Flip', window);
+                pause(1);
+            elseif bad_trials(t) == -1
+                % Set text and background color to match first trial
+                if ~bg_color_change
+                    [ptb, bg_color_change] = ptb_set_bg_color(cell2mat(trial_dat.background_color(num_stims)), cell2mat(trial_dat.text_color(num_stims)), ptb);
+                end
+
+                % Clear screen
+                Screen('Flip', window);
+                
+                if strcmp(trial_dat.trial_feedback_img(end), 'None')
+                    gazeLostMsg = gaze_message_lost_gaze;
+                    Screen('Flip', window);
+                    DrawFormattedText(window, gazeLostMsg, 'center', 'center', ptb.text_color);
+                else
+                    fb_fname = char(trial_dat.trial_feedback_img(num_stims));
+                    Screen('DrawTextures', window, fb_textures(fb_fname), [], [], 0);
+                end
+                
+                Screen('Flip', window);
+                pause(1);
             % If trial keyboard response is on, prompt for keypress
-            if trial_dat.trial_kb_resp(num_stims)
+            elseif trial_dat.trial_kb_resp(num_stims)
                 % Set text and background color to match first trial
                 if ~bg_color_change
                     [ptb, bg_color_change] = ptb_set_bg_color(cell2mat(trial_dat.background_color(num_stims)), cell2mat(trial_dat.text_color(num_stims)), ptb);
@@ -1310,7 +1369,7 @@ for b=1:num_blocks
                 end
                 kb_resp = KbName(keyCode);
             end
-            
+                
             % Display feedback
             if trial_dat.trial_feedback_type(end)
                 % Set text and background color to match first trial
@@ -1322,17 +1381,17 @@ for b=1:num_blocks
                 Screen('Flip', window);
                 
                 % Render feedback image or text
-                if bad_trials(t) || ~(strcmp(kb_resp, trial_dat.correct_kb_resp(num_stims)))
-                    if trial_dat.trial_feedback_type == 2
+                if ~(strcmp(kb_resp, trial_dat.correct_kb_resp(num_stims)))
+                    if strcmp(trial_dat.trial_feedback_img(end), 'None')
                         feedbackMsg = feedback_message_incorrect;
                         Screen('Flip', window);
                         DrawFormattedText(window, feedbackMsg, 'center', 'center', ptb.text_color);
-                    elseif trial_dat.trial_feedback_type == 1
+                    else
                         fb_fname = char(trial_dat.trial_feedback_img(num_stims));
                         Screen('DrawTextures', window, fb_textures(fb_fname), [], [], 0);
                     end
                 else
-                    if trial_dat.trial_feedback_type == 2
+                    if strcmp(trial_dat.trial_feedback_img(end), 'None')
                         feedbackMsg = feedback_message_correct;
                         Screen('Flip', window);
                         DrawFormattedText(window, feedbackMsg, 'center', 'center', ptb.text_color);
@@ -1364,6 +1423,11 @@ for b=1:num_blocks
         
         % -- Output data for current trial --------------------------------
 
+        % Allocate new otuput table row if necessary
+        if row_ct > size(partData,1)
+            partData = [partData; blank_data_row];
+        end
+        
         % Record the trial data into out data matrix
         partData.participant{row_ct} = part_dems.id;
         partData.BlockNum{row_ct} = bn;
@@ -1371,15 +1435,15 @@ for b=1:num_blocks
         partData.BadTrial{row_ct} = 0; % TBD
         
         % Extract target stimulus info from trial stim table if possible
-        if ~isnan(targetStim)
-            tr = trial_dat(targetStim,:);
-            partData.target_image_name{row_ct} = cell2mat(tr.stim_img_name);
-            partData.target_center_x{row_ct} = tr.stim_cent_x*ptb.screenXpixels;
-            partData.target_center_y{row_ct} = tr.stim_cent_y*ptb.screenYpixels;
-            partData.target_size_x{row_ct} = tr.stim_size_x*ptb.ppcm;
-            partData.target_size_y{row_ct} = tr.stim_size_y*ptb.ppcm;
-            partData.target_rotation{row_ct} = tr.stim_rotation;
-            partData.target_image_num{row_ct} = targetStim;
+        if ~isempty(targetStims)
+            tr = trial_dat(targetStims,:);
+            partData.target_image_name{row_ct} = strjoin((tr.stim_img_name),' ');
+            partData.target_center_x{row_ct} = strjoin(cellstr(num2str(tr.stim_cent_x*ptb.screenXpixels)),' ');
+            partData.target_center_y{row_ct} = strjoin(cellstr(num2str(tr.stim_cent_y*ptb.screenYpixels)),' ');
+            partData.target_size_x{row_ct} = strjoin(cellstr(num2str(tr.stim_size_x*ptb.ppcm)),' ');
+            partData.target_size_y{row_ct} = strjoin(cellstr(num2str(tr.stim_size_y*ptb.ppcm)),' ');
+            partData.target_rotation{row_ct} = strjoin(cellstr(num2str(tr.stim_rotation)),' ');
+            partData.target_image_num{row_ct} = strjoin(cellstr(num2str(targetStims)),' ');
         end
         
         % Extract chosen stimulus info from trial stim table if possible
