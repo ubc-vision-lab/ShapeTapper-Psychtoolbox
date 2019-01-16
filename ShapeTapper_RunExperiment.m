@@ -36,9 +36,12 @@ welcomeMsg = ['Welcome to the experiment!\n\n\n',...
           
 practiceStartMsg = ['Now beginning practice block.\n\n\n',...
                     'Press Any Key To Continue'];
-practiceEndMsg = 'Practice Block Finished\n\n\nPress Any Key To Continue';
+practiceEndMsg = ['Practice Block Finished\n\n\n',...
+                  'Press Any Key To Continue'];
           
-blockEndMsg = 'Block Finished\n\n\nPress Any Key To Continue';
+blockEndMsg = ['Block Finished\n\n\n',...
+               'Press Any Key To Continue\n\n',...
+               'Press F3 to Calibrate EyeLink'];
 
 expEndMsg = 'Experiment Finished\n\n\nPress Any Key To Exit';
 
@@ -47,7 +50,9 @@ timeoutMsg = 'Trial Time Expired.\n\n\nPress Any Key To Continue';
 feedback_message_correct = 'Correct!';
 feedback_message_incorrect = 'Incorrect!';
 
-gaze_message_lost_gaze = 'Lost gaze!';
+gaze_message_lost_gaze = ['Lost gaze!\n\n\n',...
+                          'Press Any Key To Continue\n\n',...
+                          'Press F3 to Calibrate EyeLink'];
 
 kbrespMsg = 'Letter?';
 
@@ -74,9 +79,17 @@ FIX_MAX_LOST_TIME = 50;
 % Get demographics info
 part_dems = GetDemographics();
 
+if isempty(fieldnames(part_dems))
+   return 
+end
+
 [config_fname,config_path] = uigetfile('./Config_Files/*.csv',...
-                              'Select an experiment %%config file');
+                              'Select an experiment %%config file');                     
 config_fname = [config_path config_fname];
+
+if ~ischar(config_fname)
+    return
+end
 
 % Specify directory containing config files
 switch nargin
@@ -529,7 +542,7 @@ for b=1:num_blocks
                     stim_schedule(s, :) = -100 + st.stim_onset;
                 end
                 
-            elseif st.stim_onset > -1
+            elseif st.stim_onset >= 0
                 % Find first frame stim is displayed
                 stim_img_on = ceil(st.stim_onset / ifi) + 1;
                 
@@ -561,7 +574,7 @@ for b=1:num_blocks
             
             % If stim is a fixation event, save in fixation schedule
             if st.subj_fixation_type ~= 0
-                stim_fix_on = ceil(st.subj_fixation_onset / ifi) + 1;
+                stim_fix_on = max(ceil(st.subj_fixation_onset / ifi),1);
                 fixation_schedule(s, stim_fix_on) = st.subj_fixation_type;
                 fixation_frames = ceil(st.subj_fixation_duration / ifi);
                 fixation_counter(s, 1) = fixation_frames;
@@ -687,8 +700,8 @@ for b=1:num_blocks
         init_frame = 1; % actual first frame (if fixation pause on frame 1)
         
         % Counts number of consecutive frames fixation or gaze is lost
-        lost_fix_max_frames = ceil(FIX_MAX_LOST_TIME / ifi);
-        lost_gaze_max_frames = ceil(GAZE_MAX_LOST_TIME / ifi);
+        lost_fix_max_frames = ceil(FIX_MAX_LOST_TIME / (1000*ifi));
+        lost_gaze_max_frames = ceil(GAZE_MAX_LOST_TIME / (1000*ifi));
         
         % This state is true prior to target onset, false after (used for
         % reaction time calculation)
@@ -760,8 +773,12 @@ for b=1:num_blocks
 
             % Listen for Esc key to abort experiment
             [keyIsDown, ~, keyCode] = KbCheck;
+            
+            if useEyelink && keyIsDown && keyCode(ptb.F3Key)
+                EyelinkDoTrackerSetup(el); % do EyeLink calibration, validation, etc.
+            end
+            
             if keyIsDown && keyCode(ptb.escapeKey)
-%                 sca;
                 abort_experiment = true;
                 break
             end
@@ -807,7 +824,7 @@ for b=1:num_blocks
             trial_touch_samples(2, glob_frame) = ty;
             trial_touch_samples(3, glob_frame) = is_touch;
             
-            gaze_good = false;
+%             gaze_good = false;
             
             % Get current gaze value
             if useEyelink
@@ -823,13 +840,6 @@ for b=1:num_blocks
                         WaitSecs(0.005);
                         Eyelink('StartRecording');
                     end
-                else
-                    eyelink_bad_count = 0; % reset the counter for bad 
-                end
-                
-                if eyelink_bad_count > lost_gaze_max_frames
-                    bad_trials(t) = -1;
-                    break
                 end
                 
                 % check for presence of a new sample update
@@ -844,11 +854,18 @@ for b=1:num_blocks
                     
                     % do we have valid data and is the pupil visible?
                     if gx~=el.MISSING_DATA && gy~=el.MISSING_DATA %|| ~(evt.pa(eye_used+1)>0)
-                        gaze_good = true; 
+%                         gaze_good = true; 
+                        eyelink_bad_count = 0; % reset the counter for bad 
                     else
                         gx = NaN;
                         gy = NaN;
+                        eyelink_bad_count = eyelink_bad_count + 1;
                     end
+                end
+                      
+                if eyelink_bad_count > lost_gaze_max_frames
+                    bad_trials(t) = -1;
+                    break
                 end
                 
                 % Test if saccade has occurred, start response period 2
@@ -921,6 +938,14 @@ for b=1:num_blocks
                 post_fix_touch = 1;
                 post_fix_gaze = 1;
             else
+                if (~any(trial_dat.subj_fixation_type(active_fixations) == 1))
+                    post_fix_touch = 1;
+                end
+                
+                if (~any(trial_dat.subj_fixation_type(active_fixations) == 2))
+                    post_fix_gaze = 1;
+                end
+                
                 if isFixationPause
                     active_p_fixations = fixation_schedule(:,frame) ~= 0;
                     pause_fix = find(trial_dat.subj_fixation_pause(active_p_fixations) == 1);
@@ -947,24 +972,28 @@ for b=1:num_blocks
                     % If fixation is touch type check for touch, reset if
                     % touch lifted
                     if fixation_counter(fidx,4) == 1
-                        if ptb_in_circ(stim_centers(fidx,:), [tx ty], stim_radius(fidx)) && is_touch
+                        if is_touch && ptb_in_circ(stim_centers(fidx,:), [tx ty], stim_radius(fidx))
                             fixation_counter(fidx,2) = fixation_counter(fidx,2) + 1;
                             fixation_counter(fidx,5) = 0;
                         else
                             fixation_counter(fidx,2) = 0;
-                            fixation_counter(fidx,5) = fixation_counter(fidx,5) + 1;
+                            if ~isFixationPause
+                                fixation_counter(fidx,5) = fixation_counter(fidx,5) + 1;
+                            end
                         end % touched fixation mask
                     end
                         
                     % If fixation is gaze type, check for gaze, reset if
                     % gaze lost
                     if fixation_counter(fidx,4) == 2
-                        if ptb_in_circ(stim_centers(fidx,:), [gx gy], stim_radius(fidx)*1.5)
+                        if ~isnan(gx) && ~isnan(gy) && ptb_in_circ(stim_centers(fidx,:), [gx gy], stim_radius(fidx)*1.5)
                             fixation_counter(fidx,2) = fixation_counter(fidx,2) + 1;
                             fixation_counter(fidx,5) = 0;
                         else
                             fixation_counter(fidx,2) = 0;
-                            fixation_counter(fidx,5) = fixation_counter(fidx,5) + 1;
+                            if ~isFixationPause
+                                fixation_counter(fidx,5) = fixation_counter(fidx,5) + 1;
+                            end
                         end % touched fixation mask
                     end
                     
@@ -985,6 +1014,9 @@ for b=1:num_blocks
                 end
             end
             
+            if bad_trials(t) == 1
+                break
+            end
             
             % Check image and mask schedules and render anything to screen
             % that is scheduled to be shown on the current frame
@@ -1141,14 +1173,14 @@ for b=1:num_blocks
                 end
             end % if fixation pause
                 
-            if gaze_good
-                gazeRect=[gx-7 gy-7 gx+8 gy+8];         
-                gx_str = num2str(gx);
-                gy_str = num2str(gy);     
-                mos_pos = strcat(gx_str, ',', gy_str);         
-                Screen('FrameOval', window, ptb.white,gazeRect,6,6);       
-                Screen('DrawText', window, mos_pos, gx+50, gy+50);
-            end
+%             if gaze_good
+%                 gazeRect=[gx-7 gy-7 gx+8 gy+8];         
+%                 gx_str = num2str(gx);
+%                 gy_str = num2str(gy);     
+%                 mos_pos = strcat(gx_str, ',', gy_str);         
+%                 Screen('FrameOval', window, ptb.white,gazeRect,6,6);       
+%                 Screen('DrawText', window, mos_pos, gx+50, gy+50);
+%             end
             
             % Flip to the screen
             [vbl, sot, flip, miss, ~] = Screen('Flip', window, vbl + (waitframes - 0.5) * ifi);
@@ -1161,9 +1193,11 @@ for b=1:num_blocks
             next_frame = 1 + missed_frame;
             
             % If missed frame, copy fixation events to subsequent frame so
-            % as not to skip them.
+            % as not to skip them (only if they are blank)
             if missed_frame && (frame + 1 < trial_frames)
-                fixation_schedule(:,frame+2) = fixation_schedule(:,frame+1);
+                if fixation_schedule(:,frame+1) ~= 0
+                    fixation_schedule(:,frame+2) = fixation_schedule(:,frame+1);
+                end
             end
           
             % If a touchable mask has been touched, store response time
@@ -1339,19 +1373,21 @@ for b=1:num_blocks
                 % Clear screen
                 Screen('Flip', window);
                 
-                if strcmp(trial_dat.trial_feedback_img(end), 'None')
-                    gazeLostMsg = gaze_message_lost_gaze;
-                    Screen('Flip', window);
-                    DrawFormattedText(window, gazeLostMsg, 'center', 'center', ptb.text_color);
-                else
-                    fb_fname = char(trial_dat.trial_feedback_img(num_stims));
-                    Screen('DrawTextures', window, fb_textures(fb_fname), [], [], 0);
-                end
+                gazeLostMsg = gaze_message_lost_gaze;
+                Screen('Flip', window);
+                DrawFormattedText(window, gazeLostMsg, 'center', 'center', ptb.text_color);
                 
                 Screen('Flip', window);
-                pause(1);
+                [~, keyCode, ~] = KbStrokeWait;
+                if keyCode(ptb.escapeKey)
+                    sca;
+                    return;
+                end
+                if useEyelink && keyCode(ptb.F3Key)
+                    EyelinkDoTrackerSetup(el); % do EyeLink calibration, validation, etc.
+                end
             % If trial keyboard response is on, prompt for keypress
-            elseif trial_dat.trial_kb_resp(num_stims)
+            elseif trial_dat.trial_kb_resp(end)
                 % Set text and background color to match first trial
                 if ~bg_color_change
                     [ptb, bg_color_change] = ptb_set_bg_color(cell2mat(trial_dat.background_color(num_stims)), cell2mat(trial_dat.text_color(num_stims)), ptb);
@@ -1371,7 +1407,7 @@ for b=1:num_blocks
             end
                 
             % Display feedback
-            if trial_dat.trial_feedback_type(end)
+            if trial_dat.trial_feedback_type(end) && bad_trials(t) == 0
                 % Set text and background color to match first trial
                 if ~bg_color_change
                     [ptb, bg_color_change] = ptb_set_bg_color(cell2mat(trial_dat.background_color(num_stims)), cell2mat(trial_dat.text_color(num_stims)), ptb);
@@ -1399,7 +1435,7 @@ for b=1:num_blocks
                 end
                 
                 Screen('Flip', window);
-                pause(1);
+                pause(0.6);
             end
         end
         
@@ -1484,7 +1520,7 @@ for b=1:num_blocks
         	partData.touch_point_relative_x{row_ct} = tp_rel_x;
             partData.touch_point_relative_y{row_ct} = tp_rel_y;
             
-            kb_correct = strcmp(ch.correct_kb_resp, kb_resp);
+            kb_correct = any(strcmp(ch.correct_kb_resp, kb_resp));
             partData.keyboard_corr_response{row_ct} = cell2mat(ch.correct_kb_resp);
             partData.keyboard_correct{row_ct} = kb_correct;
         else
@@ -1495,13 +1531,18 @@ for b=1:num_blocks
         partData.choice_correct{row_ct} = correct_choice;
         partData.touch_point_x{row_ct} = tx;
         partData.touch_point_y{row_ct} = ty;
-        partData.keyboard_user_response{row_ct} = kb_resp;
         partData.trial_time_elapsed{row_ct} = (trial_frames_elapsed+1) * ifi;
         partData.rt_target_to_choice{row_ct} = rt_target_to_choice * ifi;
         partData.rt_target_to_saccade{row_ct} = rt_target_to_saccade * ifi;
         partData.rt_saccade_to_choice{row_ct} = rt_saccade_to_choice * ifi;
         partData.rt_target_to_fingerlift{row_ct} = rt_target_to_fingerlift * ifi;
         partData.rt_fingerlift_to_choice{row_ct} = rt_fingerlift_to_choice * ifi;
+        
+        if iscell(kb_resp)
+            partData.keyboard_user_response{row_ct} = [kb_resp{:}];
+        else
+            partData.keyboard_user_response{row_ct} = kb_resp;
+        end
         
         % -- Write trial data out to one line of participant data file --------
         % Extract row corresponding to current trial
@@ -1560,6 +1601,11 @@ for b=1:num_blocks
                 sca;
                 return;
             end
+            
+            if useEyelink && keyCode(ptb.F3Key)
+                EyelinkDoTrackerSetup(el); % do EyeLink calibration, validation, etc.
+            end
+            
         end % bn < num_blocks
     else
         break
