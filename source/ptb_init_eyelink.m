@@ -19,7 +19,7 @@ Eyelink('Command', 'link_sample_data = LEFT,RIGHT,GAZE,AREA');
 el.edfFile = [part_dems.id '.edf'];
 Eyelink('Openfile', el.edfFile);
 
-EyelinkDoTrackerSetup(el); % do EyeLink calibration, validation, etc.
+% EyelinkDoTrackerSetup(el); % do EyeLink calibration, validation, etc.
 
 end
 

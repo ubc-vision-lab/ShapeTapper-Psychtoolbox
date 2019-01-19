@@ -72,6 +72,7 @@ TOUCH_MARGIN_CM = 3;
 % Amount of time (ms) we may lost gaze or fixation before aborting trial
 GAZE_MAX_LOST_TIME = 500;
 FIX_MAX_LOST_TIME = 50;
+MAX_ON_FIX_RT = 1000;
 
 %----------------------------------------------------------------------
 %                       Experimenter Setup
@@ -212,11 +213,18 @@ if useEyelink
     else
         useEyelink = 0;
     end
+    
+    % Load calibration test screen
+    calibration_sc = ptb_loadtextures(stim_dir, {'cali_all'}, img_formats, ptb);
+    
 end 
 
 % Set threshold for bad EyeLink samples in a given trial
 eyelink_bad_count = 0; % count the # of times Eyelink has missed an eye
 
+% Max tolerable number of consecutive frames gaze is lost
+el.lost_gaze_max_frames = ceil(GAZE_MAX_LOST_TIME / (1000*ifi));
+        
 %----------------------------------------------------------------------
 %                       Optotrak Setup
 %----------------------------------------------------------------------
@@ -227,7 +235,6 @@ if useOptotrak
     optk = ptb_init_optotrak(opto_initialized, part_dems, out_path, max_trial_time);
     warning('on','all')
 end 
-
 
 %----------------------------------------------------------------------
 %                     Load Stimuli Images
@@ -362,15 +369,24 @@ end
 % Flag to detect experiment end (ESC)
 abort_experiment = false;
 
+% Max number of consecutive frames touch fixation is lost
+lost_fix_max_frames = ceil(FIX_MAX_LOST_TIME / (1000*ifi));
+
+pre_trial_calibration = false;
+
 % Animation Loop -- here we render and display all blocks & trials
 % specified in the config file, and save results
 
 % BLOCK LOOP
 for b=1:num_blocks
     
-    % If this is the very  first trial, present a start screen and wait
+    % If this is the very first trial, present a start screen and wait
     % for a key-press
     if b == 1
+        if useEyelink
+            ptb_calibrate_eyelink( calibration_sc, el, ptb );
+        end
+        
         % Set text and background color to match first trial
         Screen('FillRect', window, ptb.bg_color);
         
@@ -432,6 +448,13 @@ for b=1:num_blocks
     % TRIAL LOOP
     while ~block_complete
 
+        % If trial was aborted for re-calibration (press F3), then
+        % recalibrate before starting next trial
+        if pre_trial_calibration
+            ptb_calibrate_eyelink( calibration_sc, el, ptb );
+            pre_trial_calibration = false;
+        end
+        
         % If all trials have been presented
         if t > num_trials
            % If no bad trials, then complete block
@@ -456,6 +479,7 @@ for b=1:num_blocks
             else
                 rand_bad_trial = randi([1 length(bad_trials_remaining)]);
                 t = bad_trials_remaining(rand_bad_trial);
+                bad_trials(t) = 0;
             end   
         end
         
@@ -510,12 +534,6 @@ for b=1:num_blocks
         for s=1:num_stims
             % Extract stimulus properties from trial row
             st = trial_dat(s,:);
-            
-%             % Store target mask if it matches stim description
-%             % NOTE: assumption (FOR NOW) is that only 1 stim is the target
-%             if st.stim_is_target
-%                 targetStim = s;
-%             end
             
             % Check if stimulus is activated by user action (finger lift,
             % saccade) or scheduled event, then store timing info in sched
@@ -699,10 +717,6 @@ for b=1:num_blocks
         glob_frame = 1;
         init_frame = 1; % actual first frame (if fixation pause on frame 1)
         
-        % Counts number of consecutive frames fixation or gaze is lost
-        lost_fix_max_frames = ceil(FIX_MAX_LOST_TIME / (1000*ifi));
-        lost_gaze_max_frames = ceil(GAZE_MAX_LOST_TIME / (1000*ifi));
-        
         % This state is true prior to target onset, false after (used for
         % reaction time calculation)
         pre_target = 1;
@@ -725,10 +739,13 @@ for b=1:num_blocks
         
         % Detect if finger is on touch fixation
         onFix = 0;
+        on_fix_rt_delay = 0;
+        on_fix_rt_max = ceil(MAX_ON_FIX_RT / (1000*ifi));
         
         % Initialize Optotrak recording
         if useOptotrak
-            puRealtimeData=0;puSpoolComplete=0;puSpoolStatus=0;pulFramesBuffered=0;
+            puRealtimeData=0;puSpoolComplete=0;
+            puSpoolStatus=0;pulFramesBuffered=0;
             
             %determine the trial number text
             txtTrial = [num2str(tn, '%03d') '_']; % pad left side with zeros
@@ -774,8 +791,12 @@ for b=1:num_blocks
             % Listen for Esc key to abort experiment
             [keyIsDown, ~, keyCode] = KbCheck;
             
+            % If F3 pressed during trial, abort current trial (recycle)
+            % and calibrate EyeLink before starting next trial
             if useEyelink && keyIsDown && keyCode(ptb.F3Key)
-                EyelinkDoTrackerSetup(el); % do EyeLink calibration, validation, etc.
+                pre_trial_calibration = true;
+                bad_trials(t) = 3;
+                break
             end
             
             if keyIsDown && keyCode(ptb.escapeKey)
@@ -833,7 +854,7 @@ for b=1:num_blocks
                 if(el_error~=0)
                     eyelink_bad_count = eyelink_bad_count + 1;
                     % don't let one bad data point kill ya
-                    if(eyelink_bad_count > eyelink_err_threshold)
+                    if(eyelink_bad_count > el.lost_gaze_max_frames)
                         disp('Eyelink Error!');
                         % attempt to restart Eyelink recording
                         Eyelink('StopRecording');
@@ -863,7 +884,7 @@ for b=1:num_blocks
                     end
                 end
                       
-                if eyelink_bad_count > lost_gaze_max_frames
+                if eyelink_bad_count > el.lost_gaze_max_frames
                     bad_trials(t) = -1;
                     break
                 end
@@ -986,15 +1007,17 @@ for b=1:num_blocks
                     % If fixation is gaze type, check for gaze, reset if
                     % gaze lost
                     if fixation_counter(fidx,4) == 2
-                        if ~isnan(gx) && ~isnan(gy) && ptb_in_circ(stim_centers(fidx,:), [gx gy], stim_radius(fidx)*1.5)
-                            fixation_counter(fidx,2) = fixation_counter(fidx,2) + 1;
-                            fixation_counter(fidx,5) = 0;
-                        else
-                            fixation_counter(fidx,2) = 0;
-                            if ~isFixationPause
-                                fixation_counter(fidx,5) = fixation_counter(fidx,5) + 1;
-                            end
-                        end % touched fixation mask
+                        if ~isnan(gx) && ~isnan(gy) 
+                            if ptb_in_circ(stim_centers(fidx,:), [gx gy], stim_radius(fidx)*1.5)
+                                fixation_counter(fidx,2) = fixation_counter(fidx,2) + 1;
+                                fixation_counter(fidx,5) = 0;
+                            else
+                                fixation_counter(fidx,2) = 0;
+                                if ~isFixationPause
+                                    fixation_counter(fidx,5) = fixation_counter(fidx,5) + 1;
+                                end
+                            end % touched fixation mask
+                        end
                     end
                     
                     if fixation_counter(fidx,5) > lost_fix_max_frames
@@ -1149,7 +1172,17 @@ for b=1:num_blocks
                         
                         if stim_is_touched
                             if trial_dat.subj_fixation_type(s) == 1
-                                onFix = true;
+                                if ~(fixation_counter(s,2)<fixation_counter(s,1)) && ~trial_dat.subj_fixation_pause(s)
+                                    on_fix_rt_delay = on_fix_rt_delay + 1;
+                                    if on_fix_rt_delay > on_fix_rt_max
+                                        onFix = false;
+                                    else
+                                        onFix = true;
+                                    end
+                                else
+                                    onFix = true;
+                                    on_fix_rt_delay = 0;
+                                end
                             else
                                 hasSelected = true;
                                 onFix = false;
@@ -1172,15 +1205,6 @@ for b=1:num_blocks
                     bad_trials(t) = 2;
                 end
             end % if fixation pause
-                
-%             if gaze_good
-%                 gazeRect=[gx-7 gy-7 gx+8 gy+8];         
-%                 gx_str = num2str(gx);
-%                 gy_str = num2str(gy);     
-%                 mos_pos = strcat(gx_str, ',', gy_str);         
-%                 Screen('FrameOval', window, ptb.white,gazeRect,6,6);       
-%                 Screen('DrawText', window, mos_pos, gx+50, gy+50);
-%             end
             
             % Flip to the screen
             [vbl, sot, flip, miss, ~] = Screen('Flip', window, vbl + (waitframes - 0.5) * ifi);
@@ -1237,7 +1261,11 @@ for b=1:num_blocks
             % End trial if selection has been made
             if hasSelected == true
                 nominal_frames(glob_frame) = frame;
-                correct_choice = any(targetStims == selectedStim);
+                if ~isnan(selectedStim) 
+                    correct_choice = any(targetStims == selectedStim);
+                else
+                    correct_choice = NaN;
+                end
                 break
             end
                 
@@ -1344,7 +1372,7 @@ for b=1:num_blocks
             end
         elseif ~abort_experiment
             % Display bad trial message
-            if bad_trials(t) > 0
+            if bad_trials(t) == 1 || bad_trials(t) == 2
                 % Set text and background color to match first trial
                 if ~bg_color_change
                     [ptb, bg_color_change] = ptb_set_bg_color(cell2mat(trial_dat.background_color(num_stims)), cell2mat(trial_dat.text_color(num_stims)), ptb);
@@ -1364,6 +1392,8 @@ for b=1:num_blocks
                 
                 Screen('Flip', window);
                 pause(1);
+            elseif bad_trials(t) == 3
+                Screen('Flip', window);
             elseif bad_trials(t) == -1
                 % Set text and background color to match first trial
                 if ~bg_color_change
@@ -1380,11 +1410,11 @@ for b=1:num_blocks
                 Screen('Flip', window);
                 [~, keyCode, ~] = KbStrokeWait;
                 if keyCode(ptb.escapeKey)
-                    sca;
-                    return;
+                    abort_experiment = true;
+                    break
                 end
                 if useEyelink && keyCode(ptb.F3Key)
-                    EyelinkDoTrackerSetup(el); % do EyeLink calibration, validation, etc.
+                    ptb_calibrate_eyelink( calibration_sc, el, ptb );
                 end
             % If trial keyboard response is on, prompt for keypress
             elseif trial_dat.trial_kb_resp(end)
@@ -1468,7 +1498,7 @@ for b=1:num_blocks
         partData.participant{row_ct} = part_dems.id;
         partData.BlockNum{row_ct} = bn;
         partData.TrialNum{row_ct} = tn;
-        partData.BadTrial{row_ct} = 0; % TBD
+        partData.BadTrial{row_ct} = bad_trials(t); % TBD
         
         % Extract target stimulus info from trial stim table if possible
         if ~isempty(targetStims)
@@ -1523,9 +1553,6 @@ for b=1:num_blocks
             kb_correct = any(strcmp(ch.correct_kb_resp, kb_resp));
             partData.keyboard_corr_response{row_ct} = cell2mat(ch.correct_kb_resp);
             partData.keyboard_correct{row_ct} = kb_correct;
-        else
-            % Non-stim touch, mark as bad trial
-            partData.BadTrial{row_ct} = 1;
         end
         
         partData.choice_correct{row_ct} = correct_choice;
@@ -1598,12 +1625,12 @@ for b=1:num_blocks
             Screen('Flip', window);
             [~, keyCode, ~] = KbStrokeWait;
             if keyCode(ptb.escapeKey)
-                sca;
-                return;
+                abort_experiment = true;
+                break
             end
             
             if useEyelink && keyCode(ptb.F3Key)
-                EyelinkDoTrackerSetup(el); % do EyeLink calibration, validation, etc.
+                ptb_calibrate_eyelink( calibration_sc, el, ptb );
             end
             
         end % bn < num_blocks

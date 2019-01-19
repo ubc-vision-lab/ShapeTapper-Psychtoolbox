@@ -5,10 +5,12 @@ function part_dems = GetDemographics()
 part_dems = struct();
 
 % Generate subject ID
+letters = ['a':'z' 'A':'Z'];
 symbols = ['a':'z' 'A':'Z' '0':'9'];
 MAX_ST_LENGTH = 6;
-nums = randi(numel(symbols),[1 MAX_ST_LENGTH]);
-subj_id = symbols (nums);
+ltr = randi(numel(letters));
+nums = randi(numel(symbols),[1 MAX_ST_LENGTH-1]);
+subj_id = [letters(ltr) symbols(nums)];
 part_id = inputdlg('Participant ID (press Ok to continue):','Participant ID',[1 40],{subj_id});
 
 if isempty(part_id)

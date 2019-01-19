@@ -10,11 +10,20 @@ function [ptb, bg_color_change] = ptb_set_bg_color(stim_bg_color, stim_text_colo
 
 
 % Initialize output var
-bg_color_change = false;
+ bg_color_change = false;
 
-% Convert stimulus row colors from RGB strings to vectors
-new_bg_color = cellfun(@str2double, strsplit(stim_bg_color));
-new_text_color = cellfun(@str2double, strsplit(stim_text_color));
+% Convert stimulus row colors from RGB strings to vectors, if necessary 
+if ischar(stim_bg_color)
+    new_bg_color = cellfun(@str2double, strsplit(stim_bg_color));
+else
+    new_bg_color = stim_bg_color;
+end
+
+if ischar(stim_text_color)
+    new_text_color = cellfun(@str2double, strsplit(stim_text_color));
+else
+    new_text_color = stim_text_color;
+end
 
 % Scale RGB values (assumed [0-1]) to PTB screen black and white range
 bw_scale = ptb.white - ptb.black;
@@ -22,14 +31,14 @@ new_bg_color = (new_bg_color .* bw_scale) + ptb.black;
 new_text_color =  (new_text_color .* bw_scale) + ptb.black;
 
 % If a change in background color is detected, then redraw background
-if ptb.bg_color ~= new_bg_color
+if any(ptb.bg_color ~= new_bg_color)
     ptb.bg_color = new_bg_color;
     Screen('FillRect', ptb.window, ptb.bg_color);
     bg_color_change = true;
 end
 
 % If a change in text color is detected, then save text color for output
-if ptb.text_color ~= new_text_color
+if any(ptb.text_color ~= new_text_color)
     ptb.text_color = new_text_color;
     bg_color_change = true;
 end
