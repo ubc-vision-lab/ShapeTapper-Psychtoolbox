@@ -1,15 +1,14 @@
 %HELP for function SPIDERSTUDYCONFIGFILEMAKER.
-
-%This function generates trial orders for
-%the shape spider study. It will prompy the user to select a 'top directory' within which
-%ubfolders for each image type (negative, neutral negative, neutral positive, and
-%positive) will be sampled from randomly for each trial order. The subfolder names are
-%"Negative", "Neutral_Negative", "Neutral Positive", and "Positive" but can be changed
-%below in the relevant fixed variables. This function assumes 5 core conditions (3
-%'no-jump' positions and 2 'jump' conditions in which the image starts in the same middle
-%positiona and jumps either left or right).
 %
 %Author: Rob Whitwell
+%
+%This function generates trial orders for the shape spider study. It will prompt the user
+%to select a 'top directory' within which subfolders for each image type (negative,
+%neutral negative, neutral positive, and positive) will be sampled from randomly for each
+%trial order. The subfolder names are "Negative", "Neutral_Negative", "Neutral Positive",
+%and "Positive" but can be changed below in the relevant fixed variable(s). This function
+%assumes 5 core conditions (3 'no-jump' positions and 2 'jump' conditions in which the
+%image starts in the same middle positiona and jumps either left or right).
 %
 %@PARAMS:
 %           'tpc' - the number of trials per unique condition
@@ -29,45 +28,11 @@
 %           'B' - A cell matrix denoting a summary of the conditions of 'A'.
 %               First row is the header-line.
 %
-%e.g., create two dual task trial orders with 3 blocks of trials:
-%           >> SpiderStudyConfigFileMaker(12,3,3,2);
+%e.g., create two dual task trial orders with 3 blocks of trials and use 'dual' in the
+%       file name:
+%           >> SpiderStudyConfigFileMaker(12,3,3,1,2,'dual');
 
 function [A, B] = SpiderStudyConfigFileMaker(tpc,repLim,blocks,dualTask,numTrialOrders,cnfFNm)
-
-%create the condition order. First factor level-codes 1 to 3 (no jump trials, positions
-%1,2, and 3); level-codes 4-5 (jump trials, positions 1 and 3). Second factor level-codes
-%(1 to 3 are negative stims, positive stims, and neutral stims).
-cndnOrder=CreateFactorialOrder([5 4],tpc,repLim);
-
-%store the trial total
-[trialTot,~] = size(cndnOrder);
-
-%'B' stores the condition information to save to disk as a seperate file
-B=cell(12,trialTot);
-
-%overall trial number
-B(1,1:trialTot)=num2cell(transpose(uint8(cndnOrder(:,1))));
-
-%jump vs. no jump
-B(4,:)=num2cell(transpose(cndnOrder(:,2)>3));
-
-%valence switch
-B(7,:)=num2cell(transpose(and(cndnOrder(:,2)>3,or(cndnOrder(:,3)==2,cndnOrder(:,3)==3))));
-
-%initial image position
-temp = cndnOrder(:,2);
-temp(temp==4)=2; %convert the jump to position 1 condition to an initial position 2
-temp(temp==5)=2; %convert the jump to position 3 condition to an initial position 2
-B(8,:)=num2cell(transpose(uint8(temp)));
-
-%final image position
-temp = cndnOrder(:,2);
-temp(temp==4)=1; %convert the jump to position 1 condition to a final position 1
-temp(temp==5)=3; %convert the jump to position 3 condition to a final position 3
-B(9,:)=num2cell(transpose(uint8(temp)));
-
-%remove the trial number column since it is no longer required.
-cndnOrder(:,1)=[];
 
 %FIXED VARIABLES
 TARGETIMGDISPSZXCM=single(3); %the desired width of the target image
@@ -78,27 +43,28 @@ NEGIMGDIR='Negative';
 NEUTPOSIMGDIR='Neutral_Positive';
 NEUTNEGIMGDIR='Neutral_Negative';
 
+%display info: 32" Elo (698.4mm x 392.9mm)
 FIXTNIMGFNM='fixation'; %fixation image name.
 FIXTNON = single(0); %fixation onset (seconds)
 FIXTNDUR = single(10); %fixation duration (seconds). Should match trial duration.
-FIXTNPROPXSCRN = single(.05); %proportion of the screen width the centre of the fixation cross
+FIXTNPROPXSCRN = single(.5816); %proportion of the screen width the centre of the fixation cross
 FIXTNPROPYSCRN = single(.5); %proportion of the screen height the centre of the fixation cross
 FIXTNSZ=single(.5); %width and height dimension (in cm) for the fixation cross.
 
 HOMEIMGFLNM='finger_home';
-HOMEPROPXSCRN = single(.05); %finger-home button x-centre
-HOMEPROPYSCRN = single(.4); %finger-home button y-centre
+HOMEPROPXSCRN = FIXTNPROPXSCRN; %finger-home button x-centre
+HOMEPROPYSCRN = single(.5585); %finger-home button y-centre
 HOMESZ=single(.6);
 HOMEON = single(0);
 HOMEDUR = single(.5);
 
 IMGEXT = '.png'; %image file extension
 IMGSMPLSZ = 12; %the number of unique images to present from the pool of images.
-TARGETIMGPROPXSCRN1 = single(.4);
+TARGETIMGPROPXSCRN1 = single(.7677);
 TARGETIMGPROPYSCRN1 = FIXTNPROPYSCRN;
-TARGETIMGPROPXSCRN2 = single(.45);
+TARGETIMGPROPXSCRN2 = single(.7964);
 TARGETIMGPROPYSCRN2 = FIXTNPROPYSCRN;
-TARGETIMGPROPXSCRN3 = single(.5);
+TARGETIMGPROPXSCRN3 = single(.825);
 TARGETIMGPROPYSCRN3 = FIXTNPROPYSCRN;
 
 TRLFDBCKIMG = 'Red_X';
@@ -118,33 +84,112 @@ MRGN = single(1); %margin (in cm) around each quadrant of the screen.
 %cm per inches
 CMPERINCH=2.540000076;
 
-%convert dpi to dots per cm.
-%dotsPerCm = dpi/CMPERINCH;
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%   ACQUIRE THE POOL OF IMAGES FROM WHICH TO DRAW SAMPLES FROM   %
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-%acquire some useful info.
-[FIELDNAMES,HEADERLINE,SAVEFORMATSPEC,~,CNDFIELDNAMES,CNDHEADERLINE,CNDSAVEFORMATSPEC,~] = ...
-    SpiderStudyConfigFileMakerAssist;
-numFields = length(FIELDNAMES);
+imgRootDirPath = uigetdir();
+imgNmsNeg = ls(fullfile(imgRootDirPath,NEGIMGDIR));
+imgNmsNtrlNeg = ls(fullfile(imgRootDirPath,NEUTNEGIMGDIR));
+imgNmsNtrlPos = ls(fullfile(imgRootDirPath,NEUTPOSIMGDIR));
+imgNmsPos = ls(fullfile(imgRootDirPath,POSIMGDIR));
 
-%check that the number of trials is evenly divisble by 'blocks'
-if mod(trialTot,blocks)~=0
-    disp(['Error! SPIDERSTUDYCONFIGFILEMAKER: check that trial total will be evenly '...
-        'by ''blocks'''])
+imgNmsNeg(1:2,:)=[]; %delete the '.' and '..' entries
+imgNmsNtrlNeg(1:2,:)=[]; %delete the '.' and '..' entries
+imgNmsNtrlPos(1:2,:)=[]; %delete the '.' and '..' entries
+imgNmsPos(1:2,:)=[]; %delete the '.' and '..' entries
+
+%convert the lists to cell arrays (b/c the file names differ in length) and remove the
+%file extension (no need for the file extension in the config file).
+[imgNegPopltnSz,c]=size(imgNmsNeg);
+imgNmsNeg = strtrim(mat2cell(imgNmsNeg,ones(imgNegPopltnSz,1),c));
+
+[imgNtrlNegPopltnSz,c]=size(imgNmsNtrlNeg);
+imgNmsNtrlNeg = strtrim(mat2cell(imgNmsNtrlNeg,ones(imgNtrlNegPopltnSz,1),c));
+
+[imgNtrlPosPopltnSz,c]=size(imgNmsNtrlPos); 
+imgNmsNtrlPos = strtrim(mat2cell(imgNmsNtrlPos,ones(imgNtrlPosPopltnSz,1),c));
+
+[imgPosPopltnSz,c]=size(imgNmsPos);
+imgNmsPos = strtrim(mat2cell(imgNmsPos,ones(imgPosPopltnSz,1),c));
+
+%check to make sure there are the same number of images in each category. 
+if imgNtrlNegPopltnSz ~= imgNtrlPosPopltnSz || imgNegPopltnSz ~= imgPosPopltnSz || ...
+        imgNtrlNegPopltnSz ~= imgNegPopltnSz || imgNtrlNegPopltnSz ~= imgPosPopltnSz
+    disp('Error! SPIDERSTUDYCONFIGFILEMAKER: Number of Images in each subfolder must be equal!');
     return;
-    
-%otherwise, the total number of trials is divisible by the number of requested blocks.
-%Determine the number of trials in each block.
-else
-    trialsPerBlock = trialTot/blocks;
 end
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%  GENERATE THE RAPID SERIAL VISUAL PRESENTATION OF ALPHANUMERIC CHARACTERS  %
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%remove the image file extension for the lists of image file names...
+for j=1:imgNtrlNegPopltnSz
+    imgNmsNeg{j}=cell2mat(strsplit(imgNmsNeg{j},IMGEXT));
+    imgNmsNtrlNeg{j}=cell2mat(strsplit(imgNmsNtrlNeg{j},IMGEXT));
+    imgNmsNtrlPos{j}=cell2mat(strsplit(imgNmsNtrlPos{j},IMGEXT));
+    imgNmsPos{j}=cell2mat(strsplit(imgNmsPos{j},IMGEXT));
+end
 
 %for each desired trial order...
 for i=1:numTrialOrders
 
+    %create the condition order. First factor level-codes 1 to 3 (no jump trials, positions
+    %1,2, and 3); level-codes 4-5 (jump trials, positions 1 and 3). Second factor level-codes
+    %(1 to 3 are negative stims, positive stims, and neutral stims).
+    cndnOrder=CreateFactorialOrder([5 4],tpc,repLim);
+
+    %store the trial total
+    [trialTot,~] = size(cndnOrder);
+
+    %'B' stores the condition information to save to disk as a seperate file
+    B=cell(12,trialTot);
+
+    %overall trial number
+    B(1,:)=num2cell(transpose(uint8(cndnOrder(:,1))));
+
+    %jump vs. no jump
+    B(4,:)=num2cell(transpose(cndnOrder(:,2)>3));
+
+    %valence switch
+    B(7,:)=num2cell(transpose(and(cndnOrder(:,2)>3,or(cndnOrder(:,3)==2,cndnOrder(:,3)==3))));
+
+    %initial image position
+    temp = cndnOrder(:,2);
+    temp(temp==4)=2; %convert the jump to position 1 condition to an initial position 2
+    temp(temp==5)=2; %convert the jump to position 3 condition to an initial position 2
+    B(8,:)=num2cell(transpose(uint8(temp)));
+
+    %final image position
+    temp = cndnOrder(:,2);
+    temp(temp==4)=1; %convert the jump to position 1 condition to a final position 1
+    temp(temp==5)=3; %convert the jump to position 3 condition to a final position 3
+    B(9,:)=num2cell(transpose(uint8(temp)));
+
+    %remove the trial number column since it is no longer required.
+    cndnOrder(:,1)=[];
+
+    %convert dpi to dots per cm.
+    %dotsPerCm = dpi/CMPERINCH;
+
+    %acquire some useful info.
+    [FIELDNAMES,HEADERLINE,SAVEFORMATSPEC,~,CNDFIELDNAMES,CNDHEADERLINE,CNDSAVEFORMATSPEC,~] = ...
+        SpiderStudyConfigFileMakerAssist;
+    numFields = length(FIELDNAMES);
+
+    %check that the number of trials is evenly divisble by 'blocks'
+    if mod(trialTot,blocks)~=0
+        disp(['Error! SPIDERSTUDYCONFIGFILEMAKER: check that trial total will be evenly '...
+            'by ''blocks'''])
+        return;
+
+    %otherwise, the total number of trials is divisible by the number of requested blocks.
+    %Determine the number of trials in each block.
+    else
+        trialsPerBlock = trialTot/blocks;
+    end
+    
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    %  GENERATE THE RAPID SERIAL VISUAL PRESENTATION OF ALPHANUMERIC CHARACTERS  %
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    
     %determine the number of alphanumeric characters for each series (20-25 characters)
     numChrctrsPerTrial=randi(6,[1 trialTot])+19;
     alphasPerTrial=randi(6,[1 trialTot]);
@@ -211,52 +256,15 @@ for i=1:numTrialOrders
             repmat(.03,[1 numChrctrsPerTrial(j)]) TRIALDUR-(numChrctrsPerTrial(j)*.1) -1 -3]); 
     end
     
-    B(3,:)=num2cell(uint8(repmat(1:trialsPerBlock,[1 blocks]))); %store the trial # w/n block
-    B(12,:)=transpose(cellstr(transpose(targetLetters))); %store the target letters.
+    %store the trial # w/n block
+    B(3,:)=num2cell(uint8(repmat(1:trialsPerBlock,[1 blocks])));
+    
+    %store the target letters.
+    B(12,:)=transpose(cellstr(transpose(targetLetters))); 
 
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    %ACQUIRE THE POOL OF IMAGES FROM WHICH TO DRAW SAMPLES FROM. ASSUMES THAT t
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-    imgRootDirPath = uigetdir();
-    imgNmsNeg = ls(fullfile(imgRootDirPath,NEGIMGDIR));
-    imgNmsNtrlNeg = ls(fullfile(imgRootDirPath,NEUTNEGIMGDIR));
-    imgNmsNtrlPos = ls(fullfile(imgRootDirPath,NEUTPOSIMGDIR));
-    imgNmsPos = ls(fullfile(imgRootDirPath,POSIMGDIR));
-
-    imgNmsNeg(1:2,:)=[]; %delete the '.' and '..' entries
-    imgNmsNtrlNeg(1:2,:)=[]; %delete the '.' and '..' entries
-    imgNmsNtrlPos(1:2,:)=[]; %delete the '.' and '..' entries
-    imgNmsPos(1:2,:)=[]; %delete the '.' and '..' entries
-      
-    %convert the lists to cell arrays (b/c the file names differ in length) and remove the
-    %file extension (no need for the file extension in the config file).
-    [imgNegPopltnSz,c]=size(imgNmsNeg);
-    imgNmsNeg = strtrim(mat2cell(imgNmsNeg,ones(imgNegPopltnSz,1),c));
-    
-    [imgNtrlNegPopltnSz,c]=size(imgNmsNtrlNeg);
-    imgNmsNtrlNeg = strtrim(mat2cell(imgNmsNtrlNeg,ones(imgNtrlNegPopltnSz,1),c));
-    
-    [imgNtrlPosPopltnSz,c]=size(imgNmsNtrlPos); 
-    imgNmsNtrlPos = strtrim(mat2cell(imgNmsNtrlPos,ones(imgNtrlPosPopltnSz,1),c));
-    
-    [imgPosPopltnSz,c]=size(imgNmsPos);
-    imgNmsPos = strtrim(mat2cell(imgNmsPos,ones(imgPosPopltnSz,1),c));
-    
-    %check to make sure there are the same number of images in each category. 
-    if imgNtrlNegPopltnSz ~= imgNtrlPosPopltnSz || imgNegPopltnSz ~= imgPosPopltnSz || ...
-            imgNtrlNegPopltnSz ~= imgNegPopltnSz || imgNtrlNegPopltnSz ~= imgPosPopltnSz
-        disp('Error! SPIDERSTUDYCONFIGFILEMAKER: Number of Images in each subfolder must be equal!');
-        return;
-    end
-    
-    %remove the image file extension for the lists of image file names...
-    for j=1:imgNtrlNegPopltnSz
-        imgNmsNeg{j}=cell2mat(strsplit(imgNmsNeg{j},IMGEXT));
-        imgNmsNtrlNeg{j}=cell2mat(strsplit(imgNmsNtrlNeg{j},IMGEXT));
-        imgNmsNtrlPos{j}=cell2mat(strsplit(imgNmsNtrlPos{j},IMGEXT));
-        imgNmsPos{j}=cell2mat(strsplit(imgNmsPos{j},IMGEXT));
-    end
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    %   SAMPLE FROM THE POOL OF IMAGES   %
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     %pear down the list of image file-names to a sample of images from each pool, then 
     %create a n (image sample size) x 5 conditions (3 no-jump positions + 2 jump trial 
@@ -354,7 +362,7 @@ for i=1:numTrialOrders
                 A{8,ACol} = uint8(1);                       %8: trial_kb_resp?
                 A{9,ACol} = targetLetters(j);               %9: correct_kb_resp
             end
-            A{10,ACol} = uint8(2);                          %10: trial_feedback_type
+            A{10,ACol} = uint8(1);                          %10: trial_feedback_type
             A{11,ACol} = TRLFDBCKIMG;                       %11: trial_feedback_img
             A{12,ACol} = BCKGRNDCLRNM;                      %12: background_colour RGB
             A{13,ACol} = TXTCOLOUR;                         %13: text_colour
@@ -450,7 +458,7 @@ for i=1:numTrialOrders
                 A{22,ACol} = uint8(0);                          %22: stim_is_touchable
                 A{23,ACol} = uint8(0);                          %23: stim_is_target
                 A{24,ACol} = uint8(2);                          %24: subj_fixation_type
-                A{25,ACol} = uint8(1);                          %25: subj_fixation_pause
+                A{25,ACol} = uint8(0);                          %25: subj_fixation_pause
                 A{26,ACol} = onsetOfEventsPerTrial{j}(k);       %26: subj_fixation_onset (s)
                 A{27,ACol} = durationOfEventsPerTrial{j}(k);    %27: subj_fixation_duration (s)
 
