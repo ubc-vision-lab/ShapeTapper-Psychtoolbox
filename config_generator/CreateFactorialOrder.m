@@ -2,7 +2,7 @@
 %
 %Author: Rob Whitwell
 %
-%CREATETRIALORDER creates a t x (f+1) (trials x factors + the trial number column) matrix
+%CREATETRIALORDER creates a tx(f+1) (trials x factors + the trial number column) matrix
 %in which the first column denotes the trial number and the additional columns denotes the
 %particular level of a given factor administered for that trial.
 %

@@ -59,15 +59,27 @@ kbrespMsg = 'Letter?';
 % Acceptable stimulus image formats, must be compatible with imread()
 img_formats = {'.png', '.jpg'};
 
+% Acceptable stimulus sound formats, must be compatible with wavread()
+snd_formats = {'.wav'};
+
 % Specify directory containing stimulus images
 stim_dir = 'Image_Files/';
+
+% Specify directory containing stimulus images
+snd_dir = 'Sound_Files/';
 
 % Data output path
 out_path = 'Data/';
 
+% Enter monitor diagonal size in inches
+SCREEN_DIAG_INCHES = 42.0;
+
 % Safety margin added to touchable area around stimulus images 
 % (touchable area is the defined as the smallest circle containing image)
 TOUCH_MARGIN_CM = 3;
+
+% Amount of time (ms) gaze must settle on a target to register a choice
+MIN_GAZE_CHOICE_TIME = 250;
 
 % Amount of time (ms) we may lost gaze or fixation before aborting trial
 GAZE_MAX_LOST_TIME = 500;
@@ -97,6 +109,7 @@ switch nargin
    case 0
        useEyelink = 0;
        useOptotrak = 0;
+       useSound = 0;
 %        [config_fname,config_path] = uigetfile('./Config_Files/*.csv',...
 %                                       'Select an experiment %%config file');
 %        config_fname = [config_path config_fname];
@@ -186,7 +199,7 @@ text_color = config_dat.text_color(1);
 
 % Run function to init PsychToolbox screen and store relevant vars for
 % later rendering and timing
-ptb = ptb_initscreen( bg_color, text_color );
+ptb = ptb_init_screen( bg_color, text_color, SCREEN_DIAG_INCHES );
 
 % Get window handle for PTB rendering
 window = ptb.window;
@@ -197,6 +210,30 @@ waitframes = ptb.waitframes;
 
 % Flip to clear
 Screen('Flip', window);
+
+%----------------------------------------------------------------------
+%                       Sound Setup
+%----------------------------------------------------------------------
+useSound = 0;
+
+if ismember('stim_sound_file', config_dat.Properties.VariableNames)
+    if ~all(strcmp(config_dat.stim_sound_file,'None'))
+%         InitializePsychSound(1); %init sound driver, 1 = low latency
+        Snd('Open');
+        
+        % Retreive names of stimuli images
+        has_sound_stim = ~(strcmp(config_dat.stim_sound_file,'None'));
+        snd_names = unique(config_dat.stim_sound_file(has_sound_stim));
+
+        % Extract unique strings for a list of stims
+        snd_names = unique(snd_names);
+        
+        [snd_buffers, fs] = ptb_load_sounds(snd_dir, snd_names, snd_formats);
+        
+%         pa_handle = PsychPortAudio('Open', [], [], 2, fs, 1, 0); % opens sound buffer
+        useSound = 1;
+    end
+end
 
 %----------------------------------------------------------------------
 %                       EyeLink Setup
@@ -215,7 +252,7 @@ if useEyelink
     end
     
     % Load calibration test screen
-    calibration_sc = ptb_loadtextures(stim_dir, {'cali_all'}, img_formats, ptb);
+    calibration_sc = ptb_load_textures(stim_dir, {'cali_all'}, img_formats, ptb);
     
 end 
 
@@ -250,7 +287,7 @@ img_names = unique(img_names);
 
 % Load each unique stimulus image as a PsychToolbox texture handle 
 % and store handles in a Map object to render during trials
-stim_textures = ptb_loadtextures(stim_dir, img_names, img_formats, ptb);
+stim_textures = ptb_load_textures(stim_dir, img_names, img_formats, ptb);
 
 % Retreive names of feedback images (ones not marked 'None')
 fb_img_idx =  ~strcmp(config_dat.trial_feedback_img,'None') ;
@@ -259,7 +296,7 @@ fb_img_names = unique(config_dat.trial_feedback_img(fb_img_idx));
 % Extract unique strings for a list of imgs
 fb_img_names = unique(fb_img_names);
 
-fb_textures = ptb_loadtextures(stim_dir, fb_img_names, img_formats, ptb);
+fb_textures = ptb_load_textures(stim_dir, fb_img_names, img_formats, ptb);
 
 %----------------------------------------------------------------------
 %                     Make an output data table
@@ -371,6 +408,13 @@ abort_experiment = false;
 
 % Max number of consecutive frames touch fixation is lost
 lost_fix_max_frames = ceil(FIX_MAX_LOST_TIME / (1000*ifi));
+
+% Max number of consective frames that user may remain on blank area after
+% fixation is satsfied
+on_fix_rt_max = ceil(MAX_ON_FIX_RT / (1000*ifi));
+
+% Min number of consectutive frames to register gaze choice
+gaze_choice_min_frames = ceil(MIN_GAZE_CHOICE_TIME / (1000*ifi));
 
 pre_trial_calibration = false;
 
@@ -514,6 +558,9 @@ for b=1:num_blocks
         % Initialize record of stim displayed
         stim_displayed = zeros(num_stims, 1);
         
+        % Initialize record of sounds played
+        snd_played = zeros(num_stims, 1);
+        
         % Initialize bounding rectangle for each stimulus
         stim_bounds = zeros(num_stims, 4);
         stim_centers = zeros(num_stims, 2);
@@ -526,7 +573,7 @@ for b=1:num_blocks
         dotBoundingRect = cell(1,num_stims);
 
         % Declare target mask
-        targetStims = find(trial_dat.stim_is_target == 1);
+        targetStims = find(trial_dat.stim_is_target ~= 0);
         selectedStim = NaN;
         correct_choice = false;
         
@@ -737,10 +784,12 @@ for b=1:num_blocks
         touch_on_start = 0;
         gaze_on_start = 0;
         
+        % Set gaze counter for gaze targets
+        gaze_counter = [NaN, 0];
+        
         % Detect if finger is on touch fixation
         onFix = 0;
         on_fix_rt_delay = 0;
-        on_fix_rt_max = ceil(MAX_ON_FIX_RT / (1000*ifi));
         
         % Initialize Optotrak recording
         if useOptotrak
@@ -839,13 +888,11 @@ for b=1:num_blocks
             % in X and Y in case people have two monitors connected.
             tx = min(tx, ptb.screenXpixels);
             ty = min(ty, ptb.screenYpixels);
-
-            % Store touch location and whether finger is touching
-            trial_touch_samples(1, glob_frame) = tx;
-            trial_touch_samples(2, glob_frame) = ty;
-            trial_touch_samples(3, glob_frame) = is_touch;
-            
-%             gaze_good = false;
+% 
+%             % Store touch location and whether finger is touching
+%             trial_touch_samples(1, glob_frame) = tx;
+%             trial_touch_samples(2, glob_frame) = ty;
+%             trial_touch_samples(3, glob_frame) = is_touch;
             
             % Get current gaze value
             if useEyelink
@@ -901,10 +948,10 @@ for b=1:num_blocks
                 gx = NaN;
                 gy = NaN;
             end
-            
-            % Add gaze sample to trial array
-            trial_gaze_samples(1, glob_frame) = gx;
-            trial_gaze_samples(2, glob_frame) = gy;
+%             
+%             % Add gaze sample to trial array
+%             trial_gaze_samples(1, glob_frame) = gx;
+%             trial_gaze_samples(2, glob_frame) = gy;
                
             % Test if finger lift has occurred, start response period 2
             if post_fix_touch == 1 && ~is_touch && isnan(rt_start_fingerlift)
@@ -1106,6 +1153,15 @@ for b=1:num_blocks
                                 stim_textures(stim_name),[],...
                                 stim_bounds(s,:), trial_dat.stim_rotation(s));
 
+                        % Play associated sound if applicable
+                        if useSound && ~snd_played(s) && ~strcmp(trial_dat.stim_sound_file(s), 'None')
+                            snd_name = char(trial_dat.stim_sound_file(s));
+                            Snd('Play', snd_buffers(snd_name), fs);
+%                           PsychPortAudio('FillBuffer', pa_handle, snd_buffers(snd_name)); % loads data into buffer
+%                             PsychPortAudio('Start', pa_handle, 1, 0); %starts sound immediatley
+                            snd_played(s) = 1;
+                        end
+                        
                         % Record stim presentation in global frame counter 
                         stim_presentations(s, glob_frame) = 1;
                         stim_displayed(s) = 1;
@@ -1129,6 +1185,7 @@ for b=1:num_blocks
                 
                 % Check for collisions
                 stim_is_touched = false;
+                gaze_on_object = false;
                 for s=1:num_stims
                     if stim_displayed(s) && ~stim_is_touched
                         % If stim is touchable, detect if touched
@@ -1141,7 +1198,16 @@ for b=1:num_blocks
                         % If stim is gaze target, detect gaze
                         if trial_dat.stim_is_touchable(s) == 2
                             if ptb_in_circ(stim_centers(s,:), [gx gy], stim_radius(s)) && ~gaze_on_start
-                                stim_is_touched = true;
+                                gaze_on_object = true;
+                                if gaze_counter(1) == s
+                                    gaze_counter(2) = gaze_counter(2) + 1;
+                                else
+                                    gaze_counter(1) = s;
+                                    gaze_counter(2) = 0;
+                                end
+                                if gaze_counter(2) > gaze_choice_min_frames
+                                    stim_is_touched = true;
+                                end
                             end% touched stim
                         end
                         
@@ -1151,15 +1217,34 @@ for b=1:num_blocks
                                 stim_is_touched = true;
                             end% touched stim
                             if ptb_in_circ(stim_centers(s,:), [gx gy], stim_radius(s)) && ~gaze_on_start
-                                stim_is_touched = true;
+                                gaze_on_object = true;
+                                if gaze_counter(1) == s
+                                    gaze_counter(2) = gaze_counter(2) + 1;
+                                else
+                                    gaze_counter(1) = s;
+                                    gaze_counter(2) = 0;
+                                end
+                                if gaze_counter(2) > gaze_choice_min_frames
+                                    stim_is_touched = true;
+                                end
                             end% touched stim
                         end
                         
                         % If stim is touch and gaze target, detect both
                         if trial_dat.stim_is_touchable(s) == 4
-                            if (ptb_in_circ(stim_centers(s,:), [gx gy], stim_radius(s)) && ~gaze_on_start ...
-                                    && ptb_in_circ(stim_centers(s,:), [tx ty], stim_radius(s)) && is_touch)
+                            if ~gaze_on_start && ptb_in_circ(stim_centers(s,:), [gx gy], stim_radius(s))
                                 stim_is_touched = true;
+                                gaze_on_object = true;
+                                if gaze_counter(1) == s
+                                    gaze_counter(2) = gaze_counter(2) + 1;
+                                else
+                                    gaze_counter(1) = s;
+                                    gaze_counter(2) = 0;
+                                end
+                                if (gaze_counter(2) > gaze_choice_min_frames && ...
+                                         is_touch && ptb_in_circ(stim_centers(s,:), [tx ty], stim_radius(s)))
+                                    stim_is_touched = true;
+                                end
                             end% touched stim
                         end
                         
@@ -1191,10 +1276,18 @@ for b=1:num_blocks
                                     bad_trials(t) = false;
                                 end
                             end
-                        else
+                        elseif is_fingerlift && is_touch
                             onFix = false;
+                        else
+                            onFix = true;
                         end
                     end % image displayed & touchable
+                end
+                
+                % Reset gaze counter if no gaze found on any object
+                if ~gaze_on_object
+                    gaze_counter(1) = NaN;
+                    gaze_counter(2) = 0;
                 end
                 
                 % Check for any non-stim touches, add trial to list of bad
@@ -1268,7 +1361,16 @@ for b=1:num_blocks
                 end
                 break
             end
-                
+            
+            % Store touch location and whether finger is touching
+            trial_touch_samples(1, glob_frame) = tx;
+            trial_touch_samples(2, glob_frame) = ty;
+            trial_touch_samples(3, glob_frame) = is_touch;
+            
+            % Add gaze sample to trial array
+            trial_gaze_samples(1, glob_frame) = gx;
+            trial_gaze_samples(2, glob_frame) = gy;
+            
             % Turn off initial frame
             if init_frame
                 init_frame = false;
@@ -1285,6 +1387,11 @@ for b=1:num_blocks
             glob_frame = glob_frame + 1;
             
         end % frame loop
+        
+%         if useSound
+%             Snd('Stop');
+% %             PsychPortAudio('Stop', pa_handle);% Stop sound playback
+%         end
         
         % Stop recording EyeLink data
         if useEyelink
@@ -1470,6 +1577,13 @@ for b=1:num_blocks
         end
         
         % Output frame-by-frame timestamp/presentation record
+        if length(trial_touch_samples) > length(nominal_frames)
+            trial_touch_samples = trial_touch_samples(1:length(nominal_frames)); 
+        end
+        if length(trial_gaze_samples) > length(nominal_frames)
+            trial_gaze_samples = trial_gaze_samples(1:length(nominal_frames)); 
+        end
+        
         timestamp_record = [nominal_frames; trial_timestamps; stim_presentations; trial_touch_samples; trial_gaze_samples]';
         timestamp_labels = {'frame_number','timestamp',...
                             'stimulus_onset_time',...
@@ -1550,7 +1664,11 @@ for b=1:num_blocks
         	partData.touch_point_relative_x{row_ct} = tp_rel_x;
             partData.touch_point_relative_y{row_ct} = tp_rel_y;
             
-            kb_correct = any(strcmp(ch.correct_kb_resp, kb_resp));
+            if ~strcmp(ch.correct_kb_resp, 'None')
+                kb_correct = any(strcmp(ch.correct_kb_resp, kb_resp));
+            else
+                kb_correct = NaN;
+            end
             partData.keyboard_corr_response{row_ct} = cell2mat(ch.correct_kb_resp);
             partData.keyboard_correct{row_ct} = kb_correct;
         end
@@ -1655,6 +1773,11 @@ DrawFormattedText(window, expEndMsg, 'center', 'center', ptb.text_color);
 Screen('Flip', window);
 KbStrokeWait;
 ShowCursor('arrow', window);
+
+if useSound
+    Snd('Close');
+%     PsychPortAudio('Close', pa_handle);% Close the audio device
+end
 
 % End EyeLink recording and save data file
 if useEyelink
