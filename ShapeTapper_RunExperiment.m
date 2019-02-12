@@ -11,7 +11,7 @@
 % -Jamie Dunkle, UBC Vision Lab, 2018
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-function ShapeTapper_RunExperiment(useEyelink, useOptotrak)
+function ShapeSpider_RunExperiment(useEyelink, useOptotrak)
 
 % Clear the workspace and the screen
 sca;       
@@ -72,7 +72,7 @@ snd_dir = 'Sound_Files/';
 out_path = 'Data/';
 
 % Enter monitor diagonal size in inches
-SCREEN_DIAG_INCHES = 42.0;
+SCREEN_DIAG_INCHES = 31.5;
 
 % Safety margin added to touchable area around stimulus images 
 % (touchable area is the defined as the smallest circle containing image)
@@ -107,9 +107,8 @@ end
 % Specify directory containing config files
 switch nargin
    case 0
-       useEyelink = 0;
-       useOptotrak = 0;
-       useSound = 0;
+       useEyelink = 1;
+       useOptotrak = 1;
 %        [config_fname,config_path] = uigetfile('./Config_Files/*.csv',...
 %                                       'Select an experiment %%config file');
 %        config_fname = [config_path config_fname];
@@ -679,7 +678,7 @@ for b=1:num_blocks
             mask_dotcolors = [ones(1,3).*st.mask_color 1];
 
             % Set the size of the dots
-            mask_dotsizes = ones(1, mask_ndots) .* max(1, st.mask_size);
+            mask_dotsizes = ones(1, mask_ndots) .* max(1, st.mask_size*ptb.ppcm);
 
 
             %------ Scale and offset mask points according to input params
@@ -902,11 +901,11 @@ for b=1:num_blocks
                     eyelink_bad_count = eyelink_bad_count + 1;
                     % don't let one bad data point kill ya
                     if(eyelink_bad_count > el.lost_gaze_max_frames)
-                        disp('Eyelink Error!');
-                        % attempt to restart Eyelink recording
-                        Eyelink('StopRecording');
-                        WaitSecs(0.005);
-                        Eyelink('StartRecording');
+%                         disp('Eyelink Error!');
+%                         % attempt to restart Eyelink recording
+%                         Eyelink('StopRecording');
+%                         WaitSecs(0.005);
+%                         Eyelink('StartRecording');
                     end
                 end
                 
@@ -1326,6 +1325,7 @@ for b=1:num_blocks
 
             % Note start time to calculate reaction time 1
             if start_target_onset
+%                 KbStrokeWait();
                 rt_start_target_onset = frame;
                 start_target_onset = false;
                 pre_target = false;
@@ -1351,8 +1351,10 @@ for b=1:num_blocks
                 start_fingerlift = false;
             end
             
+            [~, ~, trial_keyCode] = KbCheck();
+            
             % End trial if selection has been made
-            if hasSelected == true
+            if hasSelected == true || (trial_dat.trial_feedback_type(end)>1 && any(trial_keyCode))
                 nominal_frames(glob_frame) = frame;
                 if ~isnan(selectedStim) 
                     correct_choice = any(targetStims == selectedStim);
@@ -1524,23 +1526,27 @@ for b=1:num_blocks
                     ptb_calibrate_eyelink( calibration_sc, el, ptb );
                 end
             % If trial keyboard response is on, prompt for keypress
-            elseif trial_dat.trial_kb_resp(end)
-                % Set text and background color to match first trial
-                if ~bg_color_change
-                    [ptb, bg_color_change] = ptb_set_bg_color(cell2mat(trial_dat.background_color(num_stims)), cell2mat(trial_dat.text_color(num_stims)), ptb);
-                end
+            else
+                if mod(trial_dat.trial_kb_resp(end),2)==1 % trial_dat.trial_kb_resp(end)
+                    % Set text and background color to match first trial
+                    if ~bg_color_change
+                        [ptb, bg_color_change] = ptb_set_bg_color(cell2mat(trial_dat.background_color(num_stims)), cell2mat(trial_dat.text_color(num_stims)), ptb);
+                    end
 
-                % Draw timeout text
-                Screen('Flip', window);
-                DrawFormattedText(window, kbrespMsg, ...
-                                    'center', 'center', ptb.text_color);
-                Screen('Flip', window);
-                [~, keyCode, ~] = KbStrokeWait;
-                if keyCode(ptb.escapeKey)
-                    abort_experiment = true;
-                    break
+                    % Draw timeout text
+                    Screen('Flip', window);
+                    DrawFormattedText(window, kbrespMsg, ...
+                                        'center', 'center', ptb.text_color);
+                    Screen('Flip', window);
+                    [~, keyCode, ~] = KbStrokeWait;
+                    if keyCode(ptb.escapeKey)
+                        abort_experiment = true;
+                        break
+                    end
+                    kb_resp = KbName(keyCode);
+                elseif trial_dat.trial_kb_resp(end) == 2
+                    kb_resp = KbName(trial_keyCode);
                 end
-                kb_resp = KbName(keyCode);
             end
                 
             % Display feedback
@@ -1577,14 +1583,14 @@ for b=1:num_blocks
         end
         
         % Output frame-by-frame timestamp/presentation record
-        if length(trial_touch_samples) > length(nominal_frames)
-            trial_touch_samples = trial_touch_samples(1:length(nominal_frames)); 
-        end
-        if length(trial_gaze_samples) > length(nominal_frames)
-            trial_gaze_samples = trial_gaze_samples(1:length(nominal_frames)); 
-        end
+        data_num_frames_min = min([length(nominal_frames), ...
+                                   length(trial_timestamps), ...
+                                   length(stim_presentations), ...
+                                   length(trial_touch_samples), ... 
+                                   length(trial_gaze_samples)]);
+        rfr = 1:data_num_frames_min;
         
-        timestamp_record = [nominal_frames; trial_timestamps; stim_presentations; trial_touch_samples; trial_gaze_samples]';
+        timestamp_record = [nominal_frames(rfr); trial_timestamps(:,rfr); stim_presentations(:,rfr); trial_touch_samples(:,rfr); trial_gaze_samples(:,rfr)]';
         timestamp_labels = {'frame_number','timestamp',...
                             'stimulus_onset_time',...
                             'flip_timestamp','missed'};
